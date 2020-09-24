@@ -1,4 +1,4 @@
-# Dotfiles
+# Dotfiles: Ricing up Linux 🐧🌾🍙🍚
 
 ### What are dot files?
 Dotfiles are the hidden customization files that are used to personalize your Linux distro and really make it your very own. You can save these dotfiles and configure a fresh install of linux to your liking. You can also share your dotfiles with other users so they can achieve similar results as you. This repository contains my personal dotfiles.
@@ -29,5 +29,6 @@ Dotfiles are the hidden customization files that are used to personalize your Li
 
 1. Clone the repo.
 2. Open a terminal inside the cloned repo folder and run `stow -vSt ~ *`
+3. Have fun with your riced up Linux 🐧🌾🍙🍚.
 
 **Note:** If there are any conflicts, delete the default configs inside your home dir and try again.
