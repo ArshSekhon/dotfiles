@@ -1,0 +1,839 @@
+; vim:ft=i3config:foldmethod=marker
+;==========================================================
+;
+;
+;   ██████╗  ██████╗ ██╗  ██╗   ██╗██████╗  █████╗ ██████╗
+;   ██╔══██╗██╔═══██╗██║  ╚██╗ ██╔╝██╔══██╗██╔══██╗██╔══██╗
+;   ██████╔╝██║   ██║██║   ╚████╔╝ ██████╔╝███████║██████╔╝
+;   ██╔═══╝ ██║   ██║██║    ╚██╔╝  ██╔══██╗██╔══██║██╔══██╗
+;   ██║     ╚██████╔╝███████╗██║   ██████╔╝██║  ██║██║  ██║
+;   ╚═╝      ╚═════╝ ╚══════╝╚═╝   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝
+;
+;
+;   To learn more about how to configure Polybar
+;   go to https://github.com/polybar/polybar
+;
+;   The README contains a lot of information
+;
+;==========================================================
+; ---------- Vars ----------
+; {{{
+
+[vars]
+wifi-interface = wlo1
+default_browser = firefox
+
+; }}}
+
+
+; ---------- Colors ---------- 
+; {{{
+
+[colors]
+
+color1 = ${xrdb:color2:#73898B}
+color2 = ${xrdb:color4:#ff5555}
+color3 = ${xrdb:color7:#ff5555}
+red_color = ${xrdb:color0:#ff0000}
+orange_color = ${xrdb:color3:#73898B}
+yellow_color =${xrdb:color3:#73898B}
+cyan_color = ${xrdb:color3:#73898B}
+green_color = ${xrdb:color3:#73898B}
+purple_color = ${xrdb:color3:#73898B}
+white_color = ${xrdb:color3:#73898B}    
+gray_color = ${xrdb:color3:#73898B}
+pink_color = ${xrdb:color3:#73898B}
+blue_color = ${xrdb:color3:#73898B}
+accent_color = ${xrdb:color7:#ffffff}
+
+background = ${xrdb:background:#88000000}
+foreground = ${xrdb:background:#73898B}
+
+
+i3_module = ${xrdb:color3:#73898B}
+i3_module_focused = ${xrdb:color3:#73898B}
+time_module = ${xrdb:color3:#73898B}
+
+audio_module = ${xrdb:color3:#73898B}
+
+power_menu_module = ${xrdb:color3:#73898B}
+
+local_ip_module = ${xrdb:color3:#73898B}
+public_ip_module = ${xrdb:color3:#73898B}
+upspeed_module = ${xrdb:color3:#73898B}
+downspeed_module = ${xrdb:color3:#73898B}
+wlan_module = ${xrdb:color3:#73898B}
+
+cpu_freq_module = ${xrdb:color3:#73898B}
+memory_usage_module = ${xrdb:color3:#73898B} 
+cpu_temp_module = ${xrdb:color3:#73898B}
+cpu_temp_module_warn = ${xrdb:color3:#73898B}
+
+fs_module = ${xrdb:color3:#73898B}
+weather_module = ${xrdb:color3:#73898B}
+
+xwindow_module = ${xrdb:color3:#73898B}
+; }}}
+
+
+;  _                    
+; | |__   __ _ _ __ ___ 
+; | '_ \ / _` | '__/ __|
+; | |_) | (_| | |  \__ \
+; |_.__/ \__,_|_|  |___/
+
+;-----------------------------------------------
+
+[bar/bar-bottom]
+;{{{
+
+monitor = ${env:MONITOR:}
+enable-ipc=true
+height = 35
+width = 100%
+
+padding-right = 2 
+background = ${colors.background} 
+foreground = ${colors.foreground}
+bottom = true
+pseudo-transparency = false
+line-size = 2
+
+font-0=Iosevka:size=11;3
+font-1=Font Awesome 5 Free Solid:size=11;3
+font-2=Font Awesome 5 Free Regular:size=11;3
+font-3=Font Awesome 5 Brands:size=11;3
+font-4=font\-logos:size=14;3
+font-5=IPAGothic:size=12:antialias=true;3
+
+;https://raw.githubusercontent.com/erikflowers/weather-icons/master/font/weathericons-regular-webfont.ttf
+font-6 = Weather Icons:size=12;1
+
+modules-left = local_ip public_ip 
+;launcher i3 
+; Spotify (scripts at github.com/dietervanhoof/polybar-spotify-controls)
+modules-center = 
+;previous play pause next ;spotify
+; Mpd
+; modules-center = mpd
+modules-right = system-cpu-frequency cpu memory temperature filesystem openweathermap-detailed 
+
+scroll-up = i3wm-wsnext
+scroll-down = i3wm-wsprev
+
+wm-restack = i3
+;}}}
+
+;-----------------------------------------------
+
+[bar/bar-top]
+;{{{
+
+monitor = ${env:MONITOR:}
+enable-ipc=true
+height = 35
+width = 100%
+
+background = ${colors.background}
+foreground = ${colors.foreground}
+bottom = false
+
+line-size = 2
+
+font-0=Iosevka:size=11;3
+font-1=Font Awesome 5 Free Solid:size=11;3
+font-2=Font Awesome 5 Free Regular:size=11;3
+font-3=Font Awesome 5 Brands:size=11;3
+font-4=font\-logos:size=14;3
+font-5=IPAGothic:size=12:antialias=true;3
+font-6 = Weather Icons:size=12;1
+
+modules-left = i3 xwindow
+;launcher i3
+; Spotify (scripts at github.com/dietervanhoof/polybar-spotify-controls)
+modules-center = player-mpris-simple 
+;previous play pause next ;spotify
+; Mpd
+; modules-center = mpd
+modules-right = wlan networkspeeddown networkspeedup pulseaudio time powermenu
+
+scroll-up = i3wm-wsnext
+scroll-down = i3wm-wsprev
+
+wm-restack = i3
+
+;}}}
+
+
+;                      _       _           
+;  _ __ ___   ___   __| |_   _| | ___  ___ 
+; | '_ ` _ \ / _ \ / _` | | | | |/ _ \/ __|
+; | | | | | | (_) | (_| | |_| | |  __/\__ \
+; |_| |_| |_|\___/ \__,_|\__,_|_|\___||___/
+;-----------------------------------------------
+                                         
+[module/launcher]
+;{{{
+
+type=custom/text
+content = 
+content-font=5
+content-foreground=${colors.color1}
+content-padding=2
+click-left=launcher
+;The script above is to be found here : https://github.com/ngynLk/scripts
+
+;}}}
+
+;-----------------------------------------------
+
+[module/time]
+type = internal/date
+interval = 1
+format-margin = 0
+
+time = "%a %I:%M:%S %p"
+date = "%d %b"
+
+label = %{A1:firefox calendar.google.com:} %date%, %time%%{A}
+label-foreground = ${colors.time_module}
+label-background = ${colors.background}
+label-padding = 1
+
+;-----------------------------------------------
+
+[module/xwindow]
+;{{{
+
+type = internal/xwindow
+label = %title:0:25:...%
+label-color1 = ${colors.color1} 
+label-background = ${colors.background} 
+label-foreground = ${colors.xwindow_module}
+label-padding = 2
+
+;}}}
+
+
+;-----------------------------------------------
+
+[module/i3]
+;{{{
+
+type = internal/i3
+format = <label-state> <label-mode>
+format-foreground = ${colors.i3_module}
+format-background = ${colors.background}
+index-sort = true
+pin-workspaces = true
+enable-click = true
+reverse-scroll = false
+label-focused = %name%
+label-focused-overline = ${colors.i3_module_focused}
+label-focused-padding = 2
+label-focused-foreground = ${colors.i3_module_focused}
+
+label-unfocused = %name%
+label-unfocused-padding = 2
+
+label-urgent = %name% 
+label-urgent-padding = 2
+label-urgent-foreground = ${colors.background}
+label-urgent-background = ${colors.i3_module_focused}
+label-urgent-overline = ${colors.background}
+label-urgent-font = 2
+
+ws-icon-0 = 1
+;ws-icon-1 = 2;
+;ws-icon-2 = 3;
+;ws-icon-9 = 10;
+;ws-icon-default = 
+
+;}}}
+
+;    ___ _        _      
+;   / __| |_ __ _| |_ ___
+;   \__ \  _/ _` |  _(_-<
+;   |___/\__\__,_|\__/__/
+;
+
+;{{{
+
+;-----------------------------------------------
+
+[module/cpu]
+;{{{
+
+type = internal/cpu 
+interval = 2 
+format = (<label>)
+format-padding = 2.5
+format-foreground = ${colors.cpu_freq_module}
+label = %percentage%%
+
+;}}}
+
+[module/system-cpu-frequency]
+;{{{
+
+type = custom/script
+format-prefix = " "
+exec = ~/.config/polybar/scripts/system-cpu-frequency.sh
+interval = 10
+format-foreground = ${colors.cpu_freq_module}
+
+;}}}
+
+;-----------------------------------------------
+
+[module/memory]
+;{{{
+
+type = internal/memory
+interval = 2
+format-padding = 2.1
+format-prefix = " "
+format-foreground = ${colors.memory_usage_module}
+label = %percentage_used%%
+
+;}}}
+
+
+;-----------------------------------------------
+
+[module/temperature]
+;{{{
+
+type = internal/temperature
+thermal-zone = 0
+warn-temperature = 80
+format-padding = 2.1
+
+format = <ramp> <label>
+format-warn = <ramp> <label-warn>
+format-foreground = ${colors.cpu_temp_module}
+format-warn-foreground = ${colors.cpu_temp_module_warn}
+label = %temperature-c%
+label-warn = %temperature-c%
+label-warn-color1 = ${colors.red_color}
+
+ramp-0 = 
+ramp-1 = 
+ramp-2 = 
+
+;}}}
+
+;}}}
+
+;-----------------------------------------------
+
+[module/pulseaudio]
+;{{{
+
+type = internal/pulseaudio
+
+format-margin = 1
+format-volume = <ramp-volume><label-volume>
+label-volume = %{A3:pavucontrol:} %percentage:3:3%% %{A}
+format-volume-foreground = ${colors.audio_module}
+format-volume-background = ${colors.background}
+format-volume-padding = 2
+use-ui-max = false
+interval = 5
+
+ramp-volume-0 = ""
+ramp-volume-1 = ""
+ramp-volume-2 = ""
+
+
+label-muted = %{R} %{A3:pavucontrol:}  0% %{A} %{R}
+label-muted-background = ${colors.background}
+label-muted-foreground = ${colors.audio_module}
+label-muted-padding = 2
+
+;}}}
+
+;-----------------------------------------------
+
+[module/mpd]
+;{{{
+
+type = internal/mpd
+host = 127.0.0.1
+port = 6600
+format-online = <icon-prev> <toggle> <icon-next> <label-song> <label-time>
+format-online-padding = 2
+format-online-foreground = ${colors.color2}
+format-online-background = ${colors.background}
+label-song-foreground = ${colors.color2}
+label-song-background = ${colors.background}
+label-song-padding = 2
+label-time-foreground = ${colors.color2}
+label-time-background = ${colors.background}
+label-time-padding = 1
+
+format-offline = <label-offline>
+label-offline =  offline
+format-offline-padding = 2
+format-offline-foreground = ${colors.color2}
+format-offline-background = ${colors.background}
+
+bar-progress-width = 35
+bar-progress-indicator = |
+bar-progress-fill = ─
+bar-progress-empty = ─
+
+icon-prev = 
+icon-stop = 
+icon-play = 
+icon-pause = 
+icon-next = 
+;icon-prev = 
+;icon-stop = 
+;icon-play = 
+;icon-pause = 
+;icon-next = 
+
+label-song-maxlen = 75
+label-song-ellipsis = true
+
+;}}}
+
+;-----------------------------------------------
+
+[module/alsa]
+;{{{
+
+type = internal/alsa
+
+master-soundcard = default
+speaker-soundcard = default
+headphone-soundcard = default
+
+master-mixer = Master
+
+; Optionally define speaker and headphone mixers
+; Default: none
+speaker-mixer = Speaker
+; Default: none
+headphone-mixer = Headphone
+
+headphone-id = 9
+mapped = true
+interval = 5
+
+format-volume = <ramp-volume> <label-volume>
+
+label-muted = 🔇 muted
+label-muted-foreground = #66
+
+ramp-volume-0 = 🔈
+ramp-volume-1 = 🔉
+ramp-volume-2 = 🔊
+
+
+ramp-headphones-0 = 
+ramp-headphones-1 = 
+
+;}}}
+
+;Spotify modules
+;-----------------------------------------------
+
+[module/previous]
+;{{{
+
+type = custom/script
+format-font = 2
+format-padding = 2
+format-foreground = ${colors.color2}
+exec = echo ""
+exec-if = "pgrep spotify"
+click-left = "dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Previous"
+
+;}}}
+
+;-----------------------------------------------
+
+[module/next]
+;{{{
+
+type = custom/script
+format-font = 2
+format-padding = 2
+format-foreground = ${colors.color2}
+exec = echo ""
+exec-if = "pgrep spotify"
+click-left = "dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Next"
+
+;}}}
+
+;-----------------------------------------------
+
+[module/playpause]
+;{{{
+
+type = custom/ipc
+format-font = 2
+format-padding = 0
+format-foreground = ${colors.color2}
+; Default
+hook-0 = echo ""
+; Playing
+hook-1 = echo ""
+; Paused
+hook-2 = echo ""
+initial = 2
+click-left = "dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.PlayPause"
+
+;}}}
+
+;-----------------------------------------------
+
+
+[module/spotify]
+;{{{
+
+type = custom/ipc
+format-foreground = ${colors.color2}
+; Default
+hook-0 = echo ""
+; Playing/paused show song name and artist
+hook-1 = python3 ~/.scripts/spotify/spotify_status.py
+initial = 2
+click-left = i3-msg '[class="Spotify"] focus'
+
+;}}}
+
+;-----------------------------------------------
+
+[settings]
+;{{{
+
+screenchange-reload = true
+;compositing-background = xor
+;compositing-background = screen
+;compositing-foreground = source
+;compositing-border = over
+;pseudo-transparency = true
+
+;}}}
+
+;-----------------------------------------------
+
+[global/wm]
+;{{{
+
+margin-top = 0
+margin-bottom = 0
+
+;}}}
+
+; vim:ft=dosini
+
+;-----------------------------------------------
+
+[module/player-mpris-simple]
+;{{{
+
+type = custom/script
+exec = ~/.config/polybar/scripts/player-mpris-simple.sh
+tail = true
+click-left = playerctl previous &
+click-right = playerctl next &
+click-middle = playerctl play-pause &
+format = <label>
+format-padding = 4
+format-foreground = ${colors.cyan_color}
+
+;}}}
+
+;    ___                    
+;   | _ \_____ __ _____ _ _ 
+;   |  _/ _ \ V  V / -_) '_|
+;   |_| \___/\_/\_/\___|_|  
+;    
+
+;{{{
+    
+;-----------------------------------------------
+
+[module/battery]
+;{{{
+
+type = internal/battery
+
+full-at = 99
+
+battery = BAT0
+adapter = ADP1
+
+poll-interval = 5
+
+time-format = %H:%M
+
+format-charging = <animation-charging> <label-charging>
+format-charging-foreground = ${colors.green_color}
+format-discharging-foreground = ${colors.pink_color}
+format-discharging = <ramp-capacity> <label-discharging>
+
+format-full = <ramp-capacity> <label-full>
+
+label-charging = %percentage%%
+;
+
+label-discharging = %percentage%%
+
+label-full = %percentage%% 
+
+format-charging-padding = 1.3
+format-discharging-padding = 1.3
+format-full-padding = 1.3
+
+; Only applies if <ramp-capacity> is used
+ramp-capacity-0 = 
+ramp-capacity-1 = 
+ramp-capacity-2 = 
+ramp-capacity-3 = 
+ramp-capacity-4 = 
+
+; Only applies if <bar-capacity> is used
+bar-capacity-width = 10
+
+; Only applies if <animation-charging> is used
+animation-charging-0 = 
+animation-charging-1 = 
+animation-charging-2 = 
+animation-charging-3 = 
+animation-charging-4 = 
+; Framerate in milliseconds
+animation-charging-framerate = 750
+
+; Only applies if <animation-discharging> is used
+animation-discharging-0 = 
+animation-discharging-1 = 
+animation-discharging-2 = 
+animation-discharging-3 = 
+animation-discharging-4 = 
+; Framerate in milliseconds
+animation-discharging-framerate = 500
+
+;}}} 
+
+;-----------------------------------------------
+
+[module/powermenu]
+;{{{
+
+type = custom/text
+content = 
+content-foreground = ${colors.power_menu_module}
+click-left = ~/.config/polybar/scripts/powermenu.sh
+;The script above is to be found here : https://github.com/ngynLk/scripts
+content-padding = 3
+
+;}}}
+
+
+;}}}
+
+;}}}
+
+
+;   __      __        _   _            
+;   \ \    / /__ __ _| |_| |_  ___ _ _ 
+;    \ \/\/ / -_) _` |  _| ' \/ -_) '_|
+;     \_/\_/\___\__,_|\__|_||_\___|_|  
+;
+
+;{{{
+
+;-----------------------------------------------
+
+[module/openweathermap-detailed]
+;{{{
+
+type = custom/script
+exec = ~/.config/polybar/scripts/openweathermap-detailed.sh
+interval = 600
+label-font = 7
+format-padding=1 
+format-foreground = ${colors.weather_module}
+click-left = sensible-browser "https://www.google.com/search?q=weather"
+
+;}}}
+
+;}}}
+
+
+
+
+;    _  _     _                  _   
+;   | \| |___| |___ __ _____ _ _| |__
+;   | .` / -_)  _\ V  V / _ \ '_| / /
+;   |_|\_\___|\__|\_/\_/\___/_| |_\_\
+; 
+;{{{
+
+;-----------------------------------------------
+
+[module/wlan]
+;{{{
+
+type = internal/network
+interface = ${vars.wifi-interface}
+interval = 0.1
+
+ping_interval = 10
+udspeed-minwidth = 3
+format-connected = %{A1:nm-connection-editor:} <label-connected>  %{A}
+;format-connected =  <label-connected>%{A}
+label-connected = "  %essid% "
+label-connected-color1 = ${colors.white_color}
+
+;format-disconnected =
+format-disconnected = <label-disconnected>
+label-disconnected =  %{A1:nm-connection-editor:} %ifname% disconnected %{A}
+label-disconnected-color1 = ${colors.white_color}
+
+format-connected-foreground = ${colors.wlan_module}
+format-disconnected-foreground = ${colors.wlan_module}
+format-padding = 3
+
+ramp-signal-0 = 😱
+ramp-signal-1 = 😠
+ramp-signal-2 = 😒
+ramp-signal-3 = 😊
+ramp-signal-4 = 😃
+ramp-signal-5 = 😈
+
+ramp-signal-color1 = ${colors.white_color}
+
+;}}}
+
+
+;-----------------------------------------------
+
+[module/eth]
+;{{{
+
+type = internal/network
+interface = eno1
+interval = 3.0
+
+format-connected-prefix = " "
+format-connected-prefix-color1 = ${colors.color1-alt}
+label-connected = %local_ip%
+
+format-disconnected =
+;format-disconnected = <label-disconnected>
+;format-disconnected-underline = ${self.format-connected-underline}
+;label-disconnected = %ifname% disconnected
+;label-disconnected-color1 = ${colors.color1-alt}
+
+
+;}}}
+
+;-----------------------------------------------
+
+[module/networkspeedup]
+;{{{
+
+type = internal/network
+interface =  ${vars.wifi-interface}
+label-connected = "%upspeed:7%"
+format-connected = <label-connected>
+format-connected-prefix = " "
+;format-connected-prefix-foreground = #fefefe
+format-connected-foreground = ${colors.upspeed_module}
+;format-connected-background = #A77AC4
+format-connected-padding = 1
+
+;}}}
+
+;-----------------------------------------------
+
+[module/networkspeeddown]
+;{{{
+
+type = internal/network
+interface = ${vars.wifi-interface}
+label-connected = "%downspeed:7%"
+format-connected = <label-connected>
+format-connected-prefix = " "
+;format-connected-prefix-foreground = #fefefe
+format-connected-foreground = ${colors.downspeed_module}
+;format-connected-background = #A77AC4
+format-connected-padding = 1
+
+;}}}
+
+;-----------------------------------------------
+
+[module/local_ip]
+;{{{
+
+type = custom/script 
+exec = ~/.config/polybar/scripts/local_ip.sh
+interval = 90
+format =  <label>
+format-padding = 3
+format-font = 2
+format-foreground = ${colors.local_ip_module}
+
+;}}}
+
+[module/public_ip]
+;{{{
+
+type = custom/script 
+exec = ~/.config/polybar/scripts/public_ip.sh
+interval = 90
+format =  <label>
+format-padding = 0
+format-font = 2
+format-foreground = ${colors.public_ip_module}
+
+;}}}
+    
+;}}}
+
+
+;  ___ _ _       ___         _             
+; | __(_) |___  / __|_  _ __| |_ ___ _ __  
+; | _|| | / -_) \__ \ || (_-<  _/ -_) '  \ 
+; |_| |_|_\___| |___/\_, /__/\__\___|_|_|_|
+                    |__/
+;{{{
+
+;-----------------------------------------------
+
+[module/filesystem]
+;{{{
+
+type = internal/fs
+
+; Mountpoints to display
+mount-0 = /
+mount-1 = /home
+;mount-2 = /var 
+
+; Seconds to sleep between updates
+; Default: 30
+interval = 10
+
+; Display fixed precision values
+; Default: false
+fixed-values = true
+label-mounted =   %mountpoint% %used% / %total%
+
+; Spacing between entries
+; Default: 2
+spacing = 0
+
+format-mounted-foreground = ${colors.fs_module} 
+format-mounted-padding = 2
+
+;}}}
+
+;}}}

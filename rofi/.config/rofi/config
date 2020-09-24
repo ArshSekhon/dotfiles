@@ -1,0 +1,27 @@
+rofi.modi:                           window,ssh,drun,run
+rofi.font:                           System San Francisco Display 20
+
+rofi.bw:                             0
+rofi.br:                             5
+rofi.location:                       0
+
+
+rofi.fixed-num-lines:                false
+rofi.terminal:                       st
+rofi.ssh-client:                     ssh
+rofi.run-command:                    {cmd}
+/* rofi.parse-hosts:                    true */
+rofi.matching:                       normal
+rofi.separator-style:                solid
+rofi.scrollbar-width:                2
+rofi.kb-mode-next:                   Super_L+l
+rofi.kb-mode-previous:               Super_L+h
+rofi.kb-row-up:                      Super_L+k,Up
+rofi.kb-row-down:                    Super_L+j,Down
+rofi.display-window:                 Currently Open
+rofi.display-run:                    Execute
+rofi.display-drun:                   Applications
+rofi.eh:                             1
+rofi.line-margin:                    2
+rofi.line-padding:                   3
+rofi.theme:                          ~/.config/rofi/list.rasi

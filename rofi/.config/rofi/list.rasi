@@ -1,0 +1,109 @@
+
+* {
+    bg: #28282800;
+    fg: #d1d1d1;
+    urgent: #d65d0e;
+    highlight:  #504945E0;
+    main:       #00000099;
+
+	/*base0D: #00BCD4;*/
+
+	spacing: 0;
+	background-color: transparent;
+
+	font: "System San Francisco Display 20";
+}
+
+window {
+	transparency: "real";
+	fullscreen: true;
+	background-color: @main; /*base00 + CC (80% opacity)*/
+    location: center;
+    anchor: center;
+    padding: 100 200;
+}
+
+mainbox {
+/*	children: [inputbar, message, sidebar, listview];*/
+	spacing: 10px;
+/*	/* margin: 20%; */*/
+	padding: 0px 0px;
+	border: 0px;
+	border-color: @bg;
+}
+
+inputbar {
+	padding: 0 30px;
+	children: [prompt, textbox-prompt-colon, entry, case-indicator];
+}
+
+prompt {
+	text-color: @fg;
+}
+
+textbox-prompt-colon {
+	expand: false;
+	str: ":";
+	margin: 0 1ch 0 0;
+	text-color: @fg;
+}
+
+entry {
+	text-color: @fg;
+}
+
+case-indicator {
+	text-color: @fg;
+}
+
+sidebar, message {
+	border: 1px 0;
+	border-color: @bg;
+}
+
+button, textbox {
+	text-color: @fg;
+}
+
+button selected {
+	background-color: @main;
+}
+
+listview {
+  scrollbar: true;
+  /* fixed-height: true; */
+  margin: 0 10px 0 30px;
+  lines:  50;
+}
+
+
+element {
+	padding: 5px;
+	highlight: bold;
+}
+
+element normal {
+	background-color: transparent;
+}
+
+element selected {
+  text-color: @urgent;
+  highligt: italic underline;
+	background-color: transparent;
+}
+
+element alternate {
+	/*background-color: @base03;*/
+}
+
+element normal normal, element alternate normal {
+	text-color: @fg;
+}
+
+element normal urgent, element selected urgent, element alternate urgent {
+	text-color: @urgent;
+}
+
+element normal active, element selected active, element alternate active {
+	text-color: @fg;
+}
