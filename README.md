@@ -1,7 +1,7 @@
 # Dotfiles: Ricing up Linux 🐧🌾🍙🍚
 
 ### What are dot files?
-Dotfiles are the hidden customization files that are used to personalize your Linux distro and really make it your very own. You can save these dotfiles and configure a fresh install of linux to your liking. You can also share your dotfiles with other users so they can achieve similar results as you. This repository contains my personal dotfiles.
+Dotfiles are the hidden customization files that are used to personalize your Linux distro and really make it your very own. You can save these dotfiles somewhere safe and restore them to configure a fresh install of linux to your liking. You can also share your dotfiles with other users so they can achieve similar results as you. This repository contains my personal dotfiles.
 
 ### Packages
 
