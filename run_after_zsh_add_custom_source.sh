@@ -13,7 +13,7 @@ EOF
 
 # Check if the block already exists
 if grep -Fxq "$BLOCK_START" "$ZSHRC"; then
-  echo "✅ ~/.zshrc already contains the custom source block."
+  echo "✅ ~/.zshrc already contains the custom source block!"
 else
   echo "🔧 Adding custom source block to ~/.zshrc ..."
   echo -e "\n$BLOCK_CONTENT" >> "$ZSHRC"
