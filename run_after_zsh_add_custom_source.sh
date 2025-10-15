@@ -4,7 +4,7 @@ set -euo pipefail
 ZSHRC="$HOME/.zshrc"
 BLOCK_START="# Source all files in ~/.zsh_custom"
 BLOCK_CONTENT=$(cat <<'EOF'
-prompt off
+prompt off || true
 # Source all files in ~/.zsh_custom
 for file in ~/.zsh_custom/*.zsh; do
   [ -r "$file" ] && source "$file"
