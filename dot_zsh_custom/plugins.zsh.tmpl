@@ -6,12 +6,16 @@ source "${ZINIT_HOME}/zinit.zsh"
 
 zinit ice depth"1"
 
+ZVM_VI_INSERT_ESCAPE_BINDKEY=ii
 
 # Add in zsh plugins
 zinit light zsh-users/zsh-syntax-highlighting
 zinit light zsh-users/zsh-completions
 zinit light zsh-users/zsh-autosuggestions
 zinit light Aloxaf/fzf-tab
+zinit light jeffreytse/zsh-vi-mode
+bindkey -M viins 'ii' vi-cmd-mode
+
 
 # Add in snippets
 zinit snippet OMZL::git.zsh
