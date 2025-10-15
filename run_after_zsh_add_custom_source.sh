@@ -8,6 +8,7 @@ BLOCK_CONTENT=$(cat <<'EOF'
 for file in ~/.zsh_custom/*.zsh; do
   [ -r "$file" ] && source "$file"
 done
+prompt off
 eval "$(starship init zsh)"
 EOF
 )
