@@ -10,3 +10,4 @@ if [ ! -d "$ZINIT_HOME" ]; then
 fi
 
 curl -sSfL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh
+curl -sS https://starship.rs/install.sh | sh
