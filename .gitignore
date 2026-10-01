@@ -1,0 +1,4 @@
+# nothing here is generated — this file exists to keep it that way
+*.swp
+.DS_Store
+docs/bench.local.md
