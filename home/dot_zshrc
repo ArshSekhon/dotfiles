@@ -1,0 +1,112 @@
+# Interactive features stay out of scripts and agent subprocesses.
+[[ -o interactive ]] || return
+
+# Private state, shared between panes. A leading space omits a history entry.
+HISTSIZE=20000
+SAVEHIST=10000
+HISTFILE="${XDG_STATE_HOME:-$HOME/.local/state}/zsh/history"
+() {
+    local saved_umask=$(umask)
+    umask 077
+    command mkdir -p -- "${HISTFILE:h}" "${XDG_CACHE_HOME:-$HOME/.cache}/zsh"
+    umask "$saved_umask"
+}
+setopt SHARE_HISTORY EXTENDED_HISTORY HIST_IGNORE_SPACE HIST_IGNORE_DUPS
+setopt HIST_EXPIRE_DUPS_FIRST HIST_REDUCE_BLANKS HIST_FCNTL_LOCK
+setopt AUTO_PUSHD PUSHD_IGNORE_DUPS INTERACTIVE_COMMENTS
+unsetopt BEEP
+
+# Native completion: cache definitions, retain permission checks, skip unsafe paths.
+autoload -Uz compinit
+zmodload zsh/complist
+[[ -d ${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions ]] &&
+    fpath=("${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions" $fpath)
+compinit -i -d "${XDG_CACHE_HOME:-$HOME/.cache}/zsh/compdump-$ZSH_VERSION"
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list '' 'm:{a-zA-Z}={A-Za-z}'
+zstyle ':completion:*' use-cache on
+zstyle ':completion:*' cache-path "${XDG_CACHE_HOME:-$HOME/.cache}/zsh"
+
+# Vim editing, with a 10 ms Escape timeout. Up/Down search the typed prefix.
+bindkey -v
+KEYTIMEOUT=1
+bindkey '^[[A' history-beginning-search-backward
+bindkey '^[[B' history-beginning-search-forward
+bindkey '^[OA' history-beginning-search-backward
+bindkey '^[OB' history-beginning-search-forward
+bindkey '^[[H' beginning-of-line
+bindkey '^[[F' end-of-line
+bindkey '^[[3~' delete-char
+autoload -Uz edit-command-line
+zle -N edit-command-line
+bindkey '^X^E' edit-command-line
+bindkey -M vicmd v edit-command-line
+if (( $+commands[nvim] )); then
+    export EDITOR=${EDITOR:-nvim}
+    export VISUAL=${VISUAL:-$EDITOR}
+    alias v='nvim'
+    alias vim='nvim'
+fi
+
+# Branch/action only; never scan tracked/untracked files to render a prompt.
+autoload -Uz vcs_info add-zsh-hook
+zstyle ':vcs_info:*' enable git
+zstyle ':vcs_info:git:*' check-for-changes false
+zstyle ':vcs_info:git:*' formats '%F{magenta}%b%f '
+zstyle ':vcs_info:git:*' actionformats '%F{magenta}%b|%a%f '
+add-zsh-hook precmd vcs_info
+setopt PROMPT_SUBST
+PROMPT='%F{blue}%m%f %F{cyan}%~%f ${vcs_info_msg_0_}%(?..%F{red}[%?]%f )%F{green}%#%f '
+
+# Short, read-only Git commands for checking agent work and worktree locations.
+alias gs='git status --short --branch'
+alias gd='git diff'
+alias gds='git diff --staged'
+alias gw='git worktree list'
+if (( $+commands[delta] )); then
+    alias gdp='git -c core.pager="delta --line-numbers --navigate" diff'
+fi
+if (( $+commands[bat] )); then
+    alias cat='bat --paging=never --style=plain'
+fi
+alias ..='cd ..'
+alias ...='cd ../..'
+
+# Generate this upstream integration during bootstrap, never at shell startup.
+# fd respects ignore files; explicit excludes also avoid common heavy directories.
+if (( $+commands[fd] )); then
+    export FZF_CTRL_T_COMMAND='fd --type f --hidden --exclude .git --exclude node_modules --exclude .venv --exclude vendor --exclude target --exclude dist --exclude build'
+    export FZF_ALT_C_COMMAND='fd --type d --hidden --exclude .git --exclude node_modules --exclude .venv --exclude vendor --exclude target --exclude dist --exclude build'
+elif (( $+commands[fdfind] )); then
+    export FZF_CTRL_T_COMMAND='fdfind --type f --hidden --exclude .git --exclude node_modules --exclude .venv --exclude vendor --exclude target --exclude dist --exclude build'
+    export FZF_ALT_C_COMMAND='fdfind --type d --hidden --exclude .git --exclude node_modules --exclude .venv --exclude vendor --exclude target --exclude dist --exclude build'
+fi
+export FZF_CTRL_T_OPTS="${FZF_CTRL_T_OPTS:---walker-skip .git,node_modules,.venv,vendor,target,dist,build}"
+export FZF_ALT_C_OPTS="${FZF_ALT_C_OPTS:---walker-skip .git,node_modules,.venv,vendor,target,dist,build}"
+if [[ -o zle && -t 0 && -t 1 ]] && (( $+commands[fzf] )) && [[ -r ${XDG_DATA_HOME:-$HOME/.local/share}/zsh/fzf.zsh ]]; then
+    source "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/fzf.zsh"
+fi
+
+# Directory jumps learn on cd, with no prompt polling or init subprocess.
+if (( $+commands[zoxide] )) && [[ -r ${XDG_DATA_HOME:-$HOME/.local/share}/zsh/zoxide.zsh ]]; then
+    source "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/zoxide.zsh"
+fi
+
+# Local exports, keymaps, plugin preferences, and employer settings stay private.
+[[ -r ${ZDOTDIR:-$HOME}/.zshrc.local ]] && source "${ZDOTDIR:-$HOME}/.zshrc.local"
+
+# Two explicitly installed plugins. History-only suggestions avoid completion work
+# while typing; cap buffers so pasted agent prompts do not trigger long searches.
+(( ${+ZSH_AUTOSUGGEST_STRATEGY} )) || ZSH_AUTOSUGGEST_STRATEGY=(history)
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=${ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE:-200}
+# All widgets are loaded above; bind once instead of walking them at every prompt.
+ZSH_AUTOSUGGEST_MANUAL_REBIND=1
+if [[ -o zle && -t 0 && -t 1 && -r ${XDG_DATA_HOME:-$HOME/.local/share}/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ]]; then
+    source "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh"
+fi
+# Load highlighting last, after all completion and editing widgets are defined.
+(( ${+ZSH_HIGHLIGHT_HIGHLIGHTERS} )) || ZSH_HIGHLIGHT_HIGHLIGHTERS=(main)
+ZSH_HIGHLIGHT_MAXLENGTH=${ZSH_HIGHLIGHT_MAXLENGTH:-2000}
+if [[ -o zle && -t 0 && -t 1 && -r ${XDG_DATA_HOME:-$HOME/.local/share}/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]]; then
+    source "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+fi

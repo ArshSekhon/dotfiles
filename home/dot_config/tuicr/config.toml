@@ -1,0 +1,10 @@
+theme = "tokyo-night-storm"
+diff_view = "side-by-side"
+editor = "nvim"
+ignore_whitespace = false
+transparent_background = false
+
+# Update and refresh deliberately; keep startup and idle work small.
+no_update_check = true
+diff_watch_interval_ms = 0
+review_watch_interval_ms = 0

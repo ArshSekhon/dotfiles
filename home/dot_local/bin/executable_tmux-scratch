@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""Open a named, private scratch task on the invoking tmux server."""
+
+import fcntl
+import os
+from pathlib import Path
+import re
+import runpy
+import shutil
+import subprocess
+import sys
+
+
+def main(name=None, agent_choice=None):
+    client = os.environ.get("DOTFILES_TMUX_CLIENT")
+    socket = os.environ.get("DOTFILES_TMUX_SOCKET")
+    if not client or not socket:
+        raise ValueError("Open scratch tasks with Ctrl+A, then Shift+N inside tmux.")
+    tmux = shutil.which("tmux")
+    git = shutil.which("git")
+    if not tmux or not git:
+        raise ValueError("Scratch tasks require tmux, Git, and Python 3.8+.")
+
+    def run(*args, check=True):
+        result = subprocess.run(
+            [tmux, "-S", socket] + list(args), capture_output=True, text=True,
+            timeout=5,
+        )
+        if check and result.returncode:
+            raise ValueError(result.stderr.strip() or "tmux command failed")
+        return result
+
+    clients = run("list-clients", "-F", "#{client_name}").stdout.splitlines()
+    if client not in clients:
+        raise ValueError("The invoking tmux client is no longer attached.")
+    if name is None:
+        if len(sys.argv) > 2:
+            raise ValueError("Usage: tmux-scratch [task-name]")
+        try:
+            name = sys.argv[1] if len(sys.argv) == 2 else input(
+                "Task name (e.g. team-update; Ctrl+C cancels): "
+            )
+        except EOFError:
+            return
+    name = name.strip().lower()
+    if not name:
+        return
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", name):
+        raise ValueError("Use 1-64 letters, numbers, hyphens, or underscores.")
+
+    root = Path(os.environ.get(
+        "DOTFILES_SCRATCH_ROOT", str(Path.home() / "workspace/scratch")
+    )).expanduser()
+    if not root.is_absolute():
+        raise ValueError("DOTFILES_SCRATCH_ROOT must be an absolute path.")
+    root = root.resolve()
+    ancestor = root
+    while not ancestor.is_dir():
+        ancestor = ancestor.parent
+    in_repo = subprocess.run(
+        [git, "-C", str(ancestor), "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True, timeout=5,
+    )
+    if in_repo.returncode == 0:
+        raise ValueError("Choose a scratch root outside Git checkouts.")
+
+    os.umask(0o077)
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Kernel locking releases automatically when the helper exits, including crashes.
+    descriptor = os.open(
+        str(root / ".scratch.lock"),
+        os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600,
+    )
+    with os.fdopen(descriptor, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        directory = root / name
+        if directory.is_symlink():
+            raise ValueError("The task folder is a symlink; choose another name.")
+        session = "=scratch"
+        has_session = run("has-session", "-t", session, check=False).returncode == 0
+        window = None
+        if has_session:
+            existing = run(
+                "list-windows", "-t", session, "-F", "#{window_id}",
+                "-f", "#{==:#{window_name}," + name + "}",
+            ).stdout.splitlines()
+            if existing:
+                if len(existing) != 1:
+                    raise ValueError("More than one window uses that name; rename one.")
+                window = existing[0]
+                recorded = run("show-options", "-wqv", "-t", window,
+                               "@dotfiles_scratch_dir").stdout.strip()
+                if not recorded:
+                    recorded = run("display-message", "-p", "-t", window,
+                                   "#{pane_current_path}").stdout.strip()
+                if recorded != str(directory):
+                    raise ValueError("That window name is in use for another folder.")
+        if window is None:
+            # Load the sibling executable as a module to share one choice/default.
+            agents = runpy.run_path(str(Path(__file__).with_name("tmux-workspace")))
+            selection = agents["choose_agent"](agent_choice)
+            if selection is None:
+                return
+            directory.mkdir(exist_ok=True, mode=0o700)
+            # Unlike splits, empty windows exit. Retain ours in the same command
+            # queue, then set pane-specific failure handling before starting the tool.
+            retain = (";", "set-option", "-w", "-t", session + ":=" + name,
+                      "remain-on-exit", "on")
+            if has_session:
+                created = run(
+                    "new-window", "-d", "-t", session + ":", "-n", name,
+                    "-c", str(directory), "-P", "-F", "#{window_id}\n#{pane_id}", "", *retain,
+                ).stdout.strip()
+            else:
+                created = run(
+                    "new-session", "-d", "-s", "scratch", "-n", name,
+                    "-c", str(directory), "-P", "-F", "#{window_id}\n#{pane_id}", "", *retain,
+                ).stdout.strip()
+            window, pane = created.splitlines()
+            agents["launch_agent"](
+                lambda *args: run(*args).stdout.rstrip("\n"), pane, selection, str(directory)
+            )
+            run("set-option", "-wu", "-t", window, "remain-on-exit")
+        run("set-option", "-w", "-t", window,
+            "@dotfiles_scratch_dir", str(directory))
+        run("select-window", "-t", window)
+        run("switch-client", "-c", client, "-t", session)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print("Scratch: " + str(error), file=sys.stderr)
+        sys.exit(1)

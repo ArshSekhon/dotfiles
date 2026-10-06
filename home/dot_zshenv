@@ -1,0 +1,8 @@
+# Keep agent subprocesses quiet: native PATH setup only, no hooks or plugins.
+typeset -U path PATH
+[[ -d $HOME/.local/bin ]] && path=("$HOME/.local/bin" $path)
+# Preserve the resolved runtime PATH inherited by non-interactive agent commands.
+if [[ -o interactive || -o login ]] && [[ -d ${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}/shims ]]; then
+    path=("${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}/shims" $path)
+fi
+export PATH

@@ -1,0 +1,476 @@
+#!/usr/bin/env python3
+"""Launch a selected agent; shared selection is also used by scratch tasks."""
+
+import json
+import os
+import re
+import runpy
+from pathlib import Path
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+
+
+def preference_path():
+    state = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state")))
+    if not state.is_absolute():
+        raise ValueError("XDG_STATE_HOME must be an absolute path.")
+    return state / "dotfiles/last-agent"
+
+
+def last_agent():
+    try:
+        saved = preference_path().read_text().strip()
+    except FileNotFoundError:
+        saved = "codex"
+    return saved if saved in ("codex", "claude") else "codex"
+
+
+def choose_agent(choice=None):
+    default = last_agent()
+    if choice is None:
+        try:
+            choice = input("1  Codex    2  Claude\n\nAgent [" + default.capitalize()
+                           + "]; Enter accepts, Ctrl+C cancels: ")
+        except EOFError:
+            return None
+    choice = choice.strip().lower()
+    agent = {"": default, "1": "codex", "2": "claude",
+             "codex": "codex", "claude": "claude"}.get(choice)
+    if not agent:
+        raise ValueError("Choose 1 (Codex) or 2 (Claude).")
+    executable = shutil.which(agent)
+    if not executable:
+        raise ValueError("Install " + agent + " separately; it is missing from tmux's PATH.")
+    return agent, executable
+
+
+def remember_agent(agent):
+    path = preference_path()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Atomic replacement keeps simultaneous launches from leaving a partial choice.
+    descriptor, temporary = tempfile.mkstemp(prefix=".last-agent-", dir=str(path.parent))
+    try:
+        with os.fdopen(descriptor, "w") as stream:
+            stream.write(agent + "\n")
+        os.replace(temporary, str(path))
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def launch_agent(run, pane, selection, directory):
+    agent, executable = selection
+    # Set failure handling before launch so even immediate failures retain a pane.
+    run("set-option", "-p", "-t", pane, "remain-on-exit", "failed")
+    run("set-option", "-p", "-t", pane, "@dotfiles_agent", agent)
+    run("select-pane", "-t", pane, "-T", agent.capitalize())
+    recovery_file = Path(__file__).with_name("tmux-agent")
+    recovery = runpy.run_path(str(recovery_file))
+    token = recovery["register"](pane, agent, directory=directory)
+    run("set-option", "-p", "-t", pane, "@dotfiles_agent_cwd", directory)
+    # No -k: only respawn our newly created empty pane. The recovery helper execs
+    # the CLI after registration; no waiting supervisor or background watcher.
+    command = shlex.join([sys.executable, str(recovery_file), "start", token])
+    run("respawn-pane", "-t", pane, "exec " + command)
+    remember_agent(agent)
+
+
+def recent_folders_path():
+    return preference_path().with_name("recent-folders.json")
+
+
+def recent_folders():
+    try:
+        saved = json.loads(recent_folders_path().read_text())
+    except (OSError, ValueError):
+        return []
+    if not isinstance(saved, list):
+        return []
+    return [Path(p) for p in saved[:20]
+            if isinstance(p, str) and Path(p).is_absolute() and Path(p).is_dir()]
+
+
+def remember_folder(directory):
+    path = recent_folders_path()
+    folders = [str(Path(directory).resolve())]
+    folders.extend(str(p) for p in recent_folders() if str(p) != folders[0])
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor, temporary = tempfile.mkstemp(prefix=".recent-folders-", dir=str(path.parent))
+    try:
+        with os.fdopen(descriptor, "w") as stream:
+            json.dump(folders[:20], stream)
+            stream.write("\n")
+        os.replace(temporary, str(path))
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def folder_candidates(current):
+    # Two directory levels cover grouped checkouts; never walk repository contents.
+    configured = os.environ.get("DOTFILES_PROJECT_ROOTS", str(Path.home() / "workspace"))
+    roots = [Path(p).expanduser() for p in configured.split(os.pathsep) if p]
+    if any(not root.is_absolute() for root in roots):
+        raise ValueError("Use absolute paths in DOTFILES_PROJECT_ROOTS.")
+    candidates, seen = [], set()
+
+    def add(path):
+        if path.is_dir():
+            resolved = path.resolve()
+            if resolved not in seen:
+                candidates.append(str(resolved))
+                seen.add(resolved)
+
+    add(Path(current))
+    for path in recent_folders():
+        add(path)
+    skip = {"node_modules", "vendor", "build", "dist", "target", "venv",
+            "__pycache__", "scratch"}
+
+    def scan(root, depth):
+        if depth == 2 or (root / ".git").exists():
+            return
+        try:
+            with os.scandir(root) as entries:
+                children = sorted((Path(entry.path) for entry in entries
+                                   if not entry.name.startswith(".")
+                                   and entry.name not in skip
+                                   and entry.is_dir(follow_symlinks=False)),
+                                  key=lambda path: path.name.casefold())
+        except OSError:
+            return
+        for child in children:
+            add(child)
+            scan(child, depth + 1)
+
+    for root in roots:
+        if root.is_dir():
+            add(root)
+            scan(root, 0)
+    return candidates
+
+
+def folder_label(directory):
+    path = str(directory)
+    home = str(Path.home())
+    if path == home:
+        return "~"
+    return "~/" + path[len(home) + 1:] if path.startswith(home + "/") else path
+
+
+def child_folders(directory):
+    # Explicit browsing reads only one level, including hidden and linked folders.
+    with os.scandir(directory) as entries:
+        children = sorted((Path(entry.path) for entry in entries if entry.is_dir()),
+                          key=lambda path: path.name.casefold())
+    return [str(directory)] + [str(path) for path in children]
+
+
+def pick_folder(current):
+    executable = shutil.which("fzf")
+    if not executable:
+        raise ValueError("Install fzf separately through the dotfiles agent bootstrap.")
+    candidates = folder_candidates(current)
+    if str(Path.home()) not in candidates:
+        candidates.append(str(Path.home()))
+    base, query, message = Path(current), "", ""
+    env = os.environ.copy()
+    # Keep personal fzf defaults from adding previews, commands, or another popup.
+    for key in ("FZF_DEFAULT_COMMAND", "FZF_DEFAULT_OPTS", "FZF_DEFAULT_OPTS_FILE"):
+        env.pop(key, None)
+    while True:
+        labels = {str(path): str(path) for path in candidates}
+        header = "Enter choose / Esc back / Ctrl+j/k move\nTab browse / Alt+h parent / ~ home"
+        if message:
+            header += "\n" + message
+        result = subprocess.run(
+            [executable, "--read0", "--print0", "--print-query", "--no-multi",
+             "--layout=reverse", "--border=none", "--info=inline", "--scheme=path", "--keep-right",
+             "--prompt=Folder > ", "--header=" + header, "--query=" + query,
+             "--bind=ctrl-j:down,ctrl-k:up,enter:print(choose)+wait+accept,"
+             "tab:print(browse)+wait+accept,alt-h:print(parent)+accept,"
+             "double-click:print(choose)+wait+accept",
+             # Expand a leading ~ using a tiny shell builtin; other ~ keys insert normally.
+             "--with-shell=/bin/sh -c",
+             "--bind=~:transform:if [ -z \"$FZF_QUERY\" ]; then "
+             "printf 'change-query:%s' \"$HOME\"; else printf 'put(~)'; fi",
+             "--tiebreak=index",
+             "--color=bg:#1a1b26,fg:#c0caf5,hl:#7aa2f7,bg+:#283457,fg+:#c0caf5,hl+:#7aa2f7,pointer:#7aa2f7,prompt:#7aa2f7,header:#565f89"],
+            input=b"\0".join(os.fsencode(label) for label in labels) + b"\0",
+            stdout=subprocess.PIPE, env=env,
+        )
+        if result.returncode == 130:
+            return None
+        if result.returncode not in (0, 1):
+            raise ValueError("The folder picker exited with status " + str(result.returncode) + ".")
+        fields = result.stdout.split(b"\0")
+        if len(fields) < 3:
+            return None
+        query, action, selected = (os.fsdecode(field) for field in fields[:3])
+        typed_path = query.startswith(("~", "/", "./", "../")) or query in (".", "..")
+        if action == "parent":
+            target = base.parent
+        elif typed_path:
+            try:
+                target = Path(query).expanduser()
+            except RuntimeError:
+                message = "Home directory not found."
+                continue
+            if not target.is_absolute():
+                target = base / target
+        elif selected in labels:
+            target = Path(labels[selected])
+        else:
+            message = "No matching folder. Type a path or change the search."
+            continue
+        if not target.is_dir() and typed_path and selected in labels:
+            # Absolute prefixes should accept the highlighted completion, too.
+            completion = labels[selected]
+            if completion.casefold().startswith(str(target).casefold()):
+                target = Path(completion)
+        if not target.is_dir():
+            message = "Folder not found. Edit the path or press Esc."
+            continue
+        if action in ("browse", "parent"):
+            try:
+                candidates = child_folders(target)
+            except OSError:
+                message = "Cannot browse this folder. Edit the path or press Esc."
+                continue
+            base, query, message = target.resolve(), "", ""
+        else:
+            return str(target.resolve())
+
+
+def session_name_for(directory):
+    name = re.sub(r"[^a-z0-9_-]+", "-", Path(directory).name.lower()).strip("-_")
+    return name[:64] or "project"
+
+
+def launch_menu(current):
+    # curses is standard Python on the supported Unix systems; import on demand.
+    os.environ.setdefault("ESCDELAY", "25")
+    try:
+        import curses
+    except ImportError:
+        raise ValueError("The launcher needs Python's curses module; check your Python installation.")
+    default = last_agent()
+
+    def menu(screen):
+        screen.keypad(True)
+        blue, selected, muted = curses.A_BOLD, curses.A_REVERSE, curses.A_NORMAL
+        if curses.has_colors():
+            curses.start_color()
+            curses.use_default_colors()
+            if curses.COLORS >= 256:
+                curses.init_pair(1, 111, -1)
+                curses.init_pair(2, 153, 237)
+                curses.init_pair(3, 60, -1)
+                curses.init_pair(4, 153, -1)
+                blue = curses.color_pair(1) | curses.A_BOLD
+                selected = curses.color_pair(2) | curses.A_BOLD
+                muted = curses.color_pair(3)
+                screen.bkgd(" ", curses.color_pair(4))
+        actions = (("scratch", "[t] Scratch task (private folder)"),
+                   ("pane", "[p/P] New agent pane (current folder)"),
+                   ("session", "[s] New session (current folder)"))
+        action, agent, editing, name, directory = 0, default, False, "", current
+        while True:
+            screen.erase()
+            height, width = screen.getmaxyx()
+
+            def line(row, text, style=0):
+                if row < height - 1 and width > 4:
+                    screen.addnstr(row, 2, text, width - 4, style)
+
+            try:
+                curses.curs_set(1 if editing else 0)
+            except curses.error:
+                pass
+            if editing:
+                title = {"scratch": "Scratch task", "pane": "Named pane",
+                         "session": "New session"}[actions[action][0]]
+                line(1, title + " / " + agent.capitalize(), blue)
+                line(3, "Name: " + name)
+                description = {"scratch": "Files stay outside project checkouts.",
+                               "pane": "Another agent in the current folder.",
+                               "session": "A separate workspace in the current folder."}[actions[action][0]]
+                folder = folder_label(directory)
+                if len(folder) > width - 12:
+                    folder = "..." + folder[-max(1, width - 15):]
+                line(5, "Folder: " + folder if actions[action][0] == "session" else description, muted)
+                line(7, "Enter open   Esc back   Ctrl+C cancel", muted)
+                if actions[action][0] == "session":
+                    line(9, "Ctrl+F choose folder", muted)
+                screen.move(min(3, height - 1), min(8 + len(name), width - 2))
+            else:
+                line(1, "Open workspace", blue)
+                for index, (_, label) in enumerate(actions):
+                    line(3 + index, (("> " if action == index else "  ") + label).ljust(width - 4),
+                         selected if action == index else 0)
+                options = "[Codex]  Claude" if agent == "codex" else " Codex  [Claude]"
+                line(7, "Agent for new launches: " + options, blue)
+                line(8, "P named pane   f session in another folder", muted)
+                line(9, "j/k choose   h/l agent   Enter open   Esc cancel", muted)
+            screen.refresh()
+            choose_folder = False
+            key = screen.getch()  # Block until input: no polling or idle redraw loop.
+            if key in (3, 4):
+                return None
+            if editing:
+                if key == 27:
+                    editing = False
+                    directory = current
+                elif key in (10, 13, curses.KEY_ENTER):
+                    return (actions[action][0], agent, name,
+                            directory if actions[action][0] == "session" else current) if name.strip() else None
+                elif key == 6 and actions[action][0] == "session":
+                    choose_folder = True
+                elif key in (8, 127, curses.KEY_BACKSPACE, curses.KEY_DC):
+                    name = name[:-1]
+                elif key == 21:
+                    name = ""
+                elif 32 <= key < 127 and len(name) < 64:
+                    name += chr(key)
+            elif key in (27, ord("q")):
+                return None
+            elif key in (ord("j"), curses.KEY_DOWN):
+                changed = min(action + 1, len(actions) - 1)
+                if changed != action:
+                    name = ""
+                action = changed
+            elif key in (ord("k"), curses.KEY_UP):
+                changed = max(action - 1, 0)
+                if changed != action:
+                    name = ""
+                action = changed
+            elif key in (ord("h"), ord("l"), curses.KEY_LEFT, curses.KEY_RIGHT):
+                agent = "claude" if agent == "codex" else "codex"
+            elif key == ord("f"):
+                action, name, choose_folder = 2, "", True
+            elif key in (ord("t"), ord("p"), ord("P"), ord("s")):
+                chosen = {ord("t"): 0, ord("p"): 1, ord("P"): 1, ord("s"): 2}[key]
+                if chosen != action:
+                    name = ""
+                action = chosen
+                if actions[action][0] == "pane" and key != ord("P"):
+                    return "pane", agent, None, current
+                editing = True
+            elif key in (10, 13, curses.KEY_ENTER):
+                if actions[action][0] == "pane":
+                    return "pane", agent, None, current
+                editing = True
+            if choose_folder:
+                curses.def_prog_mode()
+                curses.endwin()
+                try:
+                    chosen = pick_folder(directory)
+                finally:
+                    curses.reset_prog_mode()
+                    screen.clear()
+                    screen.refresh()
+                if chosen is not None:
+                    directory = chosen
+                    name = name or session_name_for(directory)
+                    editing = True
+
+    try:
+        return curses.wrapper(menu)
+    except curses.error as error:
+        raise ValueError("Could not draw the launcher: " + str(error))
+
+
+def new_agent_session(run, client, name, directory, selection):
+    name = name.strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", name):
+        raise ValueError("Use 1-64 letters, numbers, hyphens, or underscores for the session name.")
+    if name == "scratch":
+        raise ValueError("The scratch session is reserved; choose Scratch task instead.")
+    if name in run("list-sessions", "-F", "#{session_name}").splitlines():
+        raise ValueError("Session '" + name + "' already exists; use Ctrl+A, s to switch to it.")
+    # Retain the empty window atomically before starting the tool, as for scratch.
+    created = run("new-session", "-d", "-s", name, "-n", selection[0], "-c", directory,
+                  "-P", "-F", "#{session_id}\n#{window_id}\n#{pane_id}", "", ";",
+                  "set-option", "-w", "-t", "=" + name + ":", "remain-on-exit", "on")
+    session, window, pane = created.splitlines()
+    launch_agent(run, pane, selection, directory)
+    run("set-option", "-wu", "-t", window, "remain-on-exit")
+    run("switch-client", "-c", client, "-t", session)
+    remember_folder(directory)
+
+
+def main():
+    client = os.environ.get("DOTFILES_TMUX_CLIENT")
+    socket = os.environ.get("DOTFILES_TMUX_SOCKET")
+    source = os.environ.get("DOTFILES_TMUX_PANE")
+    tmux = shutil.which("tmux")
+    if not client or not socket or not source or not tmux:
+        raise ValueError("Open the launcher with Ctrl+A, then Shift+N inside tmux.")
+
+    def run(*args):
+        result = subprocess.run(
+            [tmux, "-S", socket] + list(args), capture_output=True, text=True,
+            timeout=5,
+        )
+        if result.returncode:
+            raise ValueError(result.stderr.strip() or "tmux command failed")
+        return result.stdout.rstrip("\n")
+
+    if client not in run("list-clients", "-F", "#{client_name}").splitlines():
+        raise ValueError("The invoking tmux client is no longer attached.")
+    if source not in run("list-panes", "-a", "-F", "#{pane_id}").splitlines():
+        raise ValueError("The invoking pane is no longer available.")
+    identity, _, current = run(
+        "display-message", "-p", "-t", source, "#{pane_id}\n#{?pane_current_path,#{pane_current_path},#{@dotfiles_agent_cwd}}"
+    ).partition("\n")
+    if identity != source or not Path(current).is_absolute() or not Path(current).is_dir():
+        raise ValueError("The invoking pane or its working folder is no longer available.")
+    action, name, directory = "pane", None, current
+    if len(sys.argv) > 2:
+        raise ValueError("Usage: tmux-workspace [--menu|codex|claude]")
+    if len(sys.argv) == 2 and sys.argv[1] == "--menu":
+        result = launch_menu(current)
+        if result is None:
+            return
+        action, choice, name, directory = result
+        if action == "scratch":
+            scratch = runpy.run_path(str(Path(__file__).with_name("tmux-scratch")))
+            scratch["main"](name=name, agent_choice=choice)
+            return
+    else:
+        choice = sys.argv[1] if len(sys.argv) == 2 else None
+    selection = choose_agent(choice)
+    if selection is None:
+        return
+    if source not in run("list-panes", "-a", "-F", "#{pane_id}").splitlines():
+        raise ValueError("The invoking pane is no longer available.")
+    if not Path(directory).is_dir():
+        raise ValueError("The selected working folder is no longer available.")
+    if action == "session":
+        new_agent_session(run, client, name, directory, selection)
+        return
+    if name is not None:
+        name = name.strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _./:-]{0,63}", name):
+            raise ValueError("Use 1-64 letters, numbers, spaces, or . / : _ - for the pane name.")
+    target = run("split-window", "-h", "-Z", "-t", source, "-c", directory,
+                 "-P", "-F", "#{pane_id}", "")
+    if name:
+        # Keep the task label separate from terminal titles written by agent CLIs.
+        run("set-option", "-p", "-t", target, "@dotfiles_pane_name", name)
+        run("set-option", "-w", "-t", target, "pane-border-status", "top")
+    launch_agent(run, target, selection, directory)
+    run("select-pane", "-Z", "-t", target)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print("Agent launcher: " + str(error), file=sys.stderr)
+        sys.exit(1)

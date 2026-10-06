@@ -1,4 +1,7 @@
-# nothing here is generated — this file exists to keep it that way
-*.swp
 .DS_Store
-docs/bench.local.md
+__pycache__/
+*.py[cod]
+.env
+.env.*
+*.local
+*.local.*

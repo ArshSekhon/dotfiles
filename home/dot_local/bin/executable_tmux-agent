@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+"""Private exact-ID conversation capture and tmux-resurrect integration."""
+
+import argparse
+from contextlib import contextmanager
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import uuid
+
+
+def state_root():
+    path = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state')))
+    if not path.is_absolute():
+        raise ValueError('XDG_STATE_HOME must be absolute.')
+    return path / 'dotfiles/agents'
+
+
+def private_directory(path):
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.is_symlink() or path.stat().st_uid != os.getuid():
+        raise ValueError('Agent state must be an owned directory, not a symlink.')
+    path.chmod(0o700)
+
+
+def write_json(path, value):
+    private_directory(state_root())
+    private_directory(path.parent)
+    fd, temporary = tempfile.mkstemp(prefix='.agent-', dir=str(path.parent))
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(value, stream, sort_keys=True)
+            stream.write('\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, str(path))
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+@contextmanager
+def metadata_lock(token):
+    record_path(token)  # Validate before constructing the lock path.
+    root = state_root() / 'locks'
+    private_directory(root)
+    descriptor = os.open(str(root / (token + '.metadata.lock')),
+                         os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    with os.fdopen(descriptor, 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def valid_id(value):
+    try:
+        return isinstance(value, str) and str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
+
+
+def record_path(token):
+    if not valid_id(token):
+        raise ValueError('Invalid agent record ID.')
+    return state_root() / 'records' / (token + '.json')
+
+
+def read_json(path, limit=16384):
+    if path.is_symlink() or path.stat().st_uid != os.getuid():
+        raise ValueError('Agent metadata must be an owned regular file.')
+    if not path.is_file() or path.stat().st_size > limit:
+        raise ValueError('Invalid agent metadata file.')
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError('Invalid agent metadata.')
+    return data
+
+
+def tmux(*args):
+    socket = os.environ.get('DOTFILES_TMUX_SOCKET')
+    if not socket:
+        connection = os.environ.get('TMUX', '').rsplit(',', 2)
+        socket = connection[0] if len(connection) == 3 else None
+    if not socket:
+        raise ValueError('Run this command inside tmux or supply DOTFILES_TMUX_SOCKET.')
+    result = subprocess.run(['tmux', '-S', socket] + list(args),
+                            capture_output=True, text=True, timeout=5)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or 'tmux command failed.')
+    return result.stdout.rstrip('\n')
+
+
+def pane_data(pane):
+    fields = tmux('display-message', '-p', '-t', pane,
+                  '#{pane_id}\n#{pane_current_path}\n:#{@dotfiles_pane_name}').split('\n')
+    if len(fields) != 3 or fields[0] != pane:
+        raise ValueError('The target pane is no longer available.')
+    return fields[1], fields[2][1:]
+
+
+def register(pane, agent, session_id=None, directory=None):
+    current, label = pane_data(pane)
+    directory = directory if directory is not None else current
+    if not Path(directory).is_absolute() or not Path(directory).is_dir():
+        raise ValueError("The agent working folder is unavailable.")
+    token = str(uuid.uuid4())
+    env_key = 'CODEX_HOME' if agent == 'codex' else 'CLAUDE_CONFIG_DIR'
+    home = Path(os.environ.get(env_key, str(Path.home() / ('.codex' if agent == 'codex' else '.claude')))).expanduser()
+    if not home.is_absolute():
+        raise ValueError(env_key + ' must be absolute.')
+    data = {'version': 1, 'token': token, 'agent': agent, 'session_id': session_id,
+            'cwd': directory, 'label': label, 'agent_home': str(home), 'started': False,
+            'nonce': None, 'manual': session_id is not None}
+    write_json(record_path(token), data)
+    tmux('set-option', '-p', '-t', pane, '@dotfiles_agent_record', token)
+    return token
+
+
+def capture(agent):
+    # Globally registered hooks do nothing for conversations outside our launcher.
+    token = os.environ.get('DOTFILES_AGENT_RECORD')
+    nonce = os.environ.get('DOTFILES_AGENT_NONCE')
+    if not token or not nonce:
+        return
+    payload = json.loads(sys.stdin.read(65537))
+    if not isinstance(payload, dict) or payload.get('hook_event_name') != 'SessionStart':
+        return
+    if payload.get('agent_id'):
+        return
+    session_id = payload.get('session_id')
+    if not valid_id(session_id):
+        raise ValueError('The agent hook supplied no valid conversation UUID.')
+    path = record_path(token)
+    with metadata_lock(token):
+        data = read_json(path)
+        if data.get('agent') != agent or data.get('nonce') != nonce:
+            return  # Ignore late hooks from a previous invocation.
+        data['session_id'] = session_id
+        write_json(path, data)
+
+
+def set_pane_metadata(pane, data):
+    tmux('set-option', '-p', '-t', pane, '@dotfiles_agent', data['agent'])
+    tmux('set-option', '-p', '-t', pane, '@dotfiles_agent_record', data['token'])
+    tmux('set-option', '-p', '-t', pane, '@dotfiles_agent_cwd', data['cwd'])
+    tmux('set-option', '-p', '-t', pane, 'remain-on-exit', 'failed')
+    if data.get('label'):
+        tmux('set-option', '-p', '-t', pane, '@dotfiles_pane_name', data['label'])
+        tmux('set-option', '-w', '-t', pane, 'pane-border-status', 'top')
+
+
+def run_agent(data, resume):
+    agent, token = data.get('agent'), data.get('token')
+    if agent not in ('codex', 'claude') or not valid_id(token):
+        raise ValueError('Invalid saved agent record.')
+    pane = os.environ.get('TMUX_PANE')
+    if pane:
+        set_pane_metadata(pane, data)
+    session_id = data.get('session_id')
+    if resume and not valid_id(session_id):
+        raise ValueError('No exact conversation ID was captured. Trust the Codex hook with /hooks; '
+                         'bind an existing conversation explicitly with tmux-agent bind.')
+    executable = shutil.which(agent)
+    if not executable:
+        raise ValueError('Install ' + agent + ' separately; no conversation was started.')
+    directory = Path(data.get('cwd', ''))
+    if not directory.is_absolute() or not directory.is_dir():
+        raise ValueError('The saved working folder is unavailable; no conversation was started.')
+    root = state_root() / 'locks'
+    private_directory(root)
+    descriptor = os.open(str(root / (token + '.lock')),
+                         os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    with os.fdopen(descriptor, 'w') as lock:
+        try:
+            fcntl.lockf(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, PermissionError):
+            raise ValueError('This managed agent is already running; switch to its existing pane.')
+        path = record_path(token)
+        with metadata_lock(token):
+            if not resume and read_json(path).get('started'):
+                raise ValueError('This pane has already launched. Use a saved recovery snapshot.')
+            data['started'], data['nonce'] = True, str(uuid.uuid4())
+            write_json(path, data)
+        env = os.environ.copy()
+        # Popup/source targeting must not leak into the new pane's runtime.
+        for key in ('DOTFILES_TMUX_SOCKET', 'DOTFILES_TMUX_CLIENT', 'DOTFILES_TMUX_PANE'):
+            env.pop(key, None)
+        env['DOTFILES_AGENT_RECORD'], env['DOTFILES_AGENT_NONCE'] = token, data['nonce']
+        env_key = 'CODEX_HOME' if agent == 'codex' else 'CLAUDE_CONFIG_DIR'
+        home = data.get('agent_home')
+        if not isinstance(home, str) or not Path(home).is_absolute():
+            raise ValueError('The saved agent configuration directory is invalid.')
+        env[env_key] = home
+        command = [executable]
+        if resume:
+            command += ['resume', session_id] if agent == 'codex' else ['--resume', session_id]
+        # A POSIX process lock survives exec but is not inherited by CLI children.
+        # Replace Python entirely: no supervisor, watcher, polling, or PTY proxy.
+        os.set_inheritable(lock.fileno(), True)
+        os.chdir(str(directory))
+        os.execvpe(executable, command, env)
+
+
+def snapshot_path(digest):
+    if not re.fullmatch(r'[0-9a-f]{64}', digest):
+        raise ValueError('Invalid recovery snapshot ID.')
+    return state_root() / 'snapshots' / (digest + '.json')
+
+
+def save_layout(filename):
+    """Rewrite only managed process commands in the plugin's just-saved layout."""
+    path = Path(filename)
+    if path.is_symlink() or not path.is_file() or path.stat().st_uid != os.getuid():
+        raise ValueError('Expected the owned layout file passed by tmux-resurrect.')
+    rows = tmux('list-panes', '-a', '-F',
+                '#{session_name}\t#{window_index}\t#{pane_index}\t'
+                '#{@dotfiles_agent_record}\t#{@dotfiles_pane_name}\t#{pane_current_path}').splitlines()
+    managed = {}
+    for row in rows:
+        fields = row.split('\t')
+        if len(fields) == 6 and valid_id(fields[3]):
+            managed[tuple(fields[:3])] = fields[3:]
+    lines, changed = [], False
+    for line in path.read_text().splitlines(keepends=True):
+        fields = line.rstrip('\n').split('\t')
+        key = tuple(fields[index] for index in (1, 2, 5)) if len(fields) == 11 and fields[0] == 'pane' else None
+        if key in managed:
+            token, label, current = managed[key]
+            try:
+                data = read_json(record_path(token))
+            except (OSError, ValueError):
+                # Freeze an explicit missing-ID record so recovery cannot run a raw agent.
+                data = {'version': 1, 'token': token, 'agent': 'codex', 'session_id': None,
+                        'agent_home': str(Path.home() / '.codex')}
+            data = {name: data.get(name) for name in
+                    ('version', 'token', 'agent', 'session_id', 'agent_home', 'cwd')}
+            data.update(cwd=current or data.get('cwd', ''), label=label)
+            digest = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+            saved = snapshot_path(digest)
+            if not saved.exists():
+                write_json(saved, data)
+            command = 'exec ' + shlex.join([sys.executable, str(Path(__file__).resolve()), 'resume', digest])
+            fields[10] = ':' + command
+            line = '\t'.join(fields) + '\n'
+            changed = True
+        lines.append(line)
+    if changed:
+        # This is a plugin-owned output file, not its existing last-snapshot symlink.
+        fd, temporary = tempfile.mkstemp(prefix='.agent-layout-', dir=str(path.parent))
+        try:
+            with os.fdopen(fd, 'w') as stream:
+                stream.write(''.join(lines))
+            os.replace(temporary, str(path))
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+
+def hook_group(agent):
+    return {'hooks': [{'type': 'command', 'command':
+                      'python3 "$HOME/.local/bin/tmux-agent" capture ' + agent,
+                      'timeout': 5}]}
+
+
+def setup(dry_run):
+    # Agent settings remain private; merge our single hook without replacing user keys.
+    for agent, env_key, default, name in (
+        ('codex', 'CODEX_HOME', '.codex', 'hooks.json'),
+        ('claude', 'CLAUDE_CONFIG_DIR', '.claude', 'settings.json'),
+    ):
+        home = Path(os.environ.get(env_key, str(Path.home() / default))).expanduser()
+        if not home.is_absolute():
+            raise ValueError(env_key + ' must be absolute.')
+        path = home / name
+        data = read_json(path, limit=2 * 1024 * 1024) if path.exists() else {}
+        if not isinstance(data.get("hooks", {}), dict):
+            raise ValueError("Unexpected hooks configuration; merge it manually.")
+        groups = data.setdefault('hooks', {}).setdefault('SessionStart', [])
+        if not isinstance(groups, list):
+            raise ValueError('Unexpected SessionStart hook configuration; merge it manually.')
+        group = hook_group(agent)
+        if group in groups:
+            print(agent + ': recovery hook already present')
+            continue
+        print(agent + ': add SessionStart recovery hook (preserve existing settings)')
+        if dry_run:
+            continue
+        backup = state_root().parent / 'backups' / ('agent-hooks-' + str(uuid.uuid4()))
+        private_directory(backup)
+        if path.exists():
+            saved = backup / name
+            shutil.copyfile(path, saved)
+            saved.chmod(0o600)
+        write_json(backup / 'manifest.json', {'target': str(path), 'existed': path.exists(),
+                                                'mode': path.stat().st_mode & 0o777 if path.exists() else None})
+        groups.append(group)
+        write_json(path, data)
+    if not dry_run:
+        print('Codex: review and trust the new hook through /hooks in a new CLI session.')
+
+
+def status():
+    for row in tmux('list-panes', '-a', '-F',
+                    '#{pane_id}\t#{@dotfiles_agent}\t#{@dotfiles_agent_record}').splitlines():
+        pane, agent, token = row.split('\t')
+        if agent not in ('codex', 'claude'):
+            continue
+        try:
+            data = read_json(record_path(token))
+            readiness = 'ready' if valid_id(data.get('session_id')) else 'awaiting hook / exact ID'
+            if data.get('manual'):
+                readiness += ' (manual binding)'
+        except (OSError, ValueError):
+            readiness = 'unregistered; bind exact ID'
+        print(pane + '  ' + agent + '  ' + readiness)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    for command in ('start', 'resume', 'capture'):
+        commands.add_parser(command).add_argument('id')
+    commands.add_parser('save-layout').add_argument('file')
+    commands.add_parser('setup').add_argument('--dry-run', action='store_true')
+    commands.add_parser('status')
+    bind = commands.add_parser('bind', help='Explicitly register an existing conversation without restarting it')
+    bind.add_argument('agent', choices=('codex', 'claude'))
+    bind.add_argument('id')
+    bind.add_argument('--pane', default=os.environ.get('TMUX_PANE'))
+    args = parser.parse_args()
+    if args.command == 'capture':
+        capture(args.id)
+    elif args.command == 'start':
+        if os.environ.get('TMUX_PANE'):
+            tmux('set-option', '-p', '-t', os.environ['TMUX_PANE'], 'remain-on-exit', 'failed')
+        return run_agent(read_json(record_path(args.id)), False)
+    elif args.command == 'resume':
+        if os.environ.get('TMUX_PANE'):
+            tmux('set-option', '-p', '-t', os.environ['TMUX_PANE'], 'remain-on-exit', 'failed')
+        return run_agent(read_json(snapshot_path(args.id)), True)
+    elif args.command == 'save-layout':
+        save_layout(args.file)
+    elif args.command == 'setup':
+        setup(args.dry_run)
+    elif args.command == 'status':
+        status()
+    elif args.command == 'bind':
+        if not valid_id(args.id) or not args.pane or not re.fullmatch(r'%\d+', args.pane):
+            raise ValueError('Supply an exact conversation UUID and a tmux pane ID (%N).')
+        existing = tmux('show-options', '-pqv', '-t', args.pane, '@dotfiles_agent_record')
+        if existing and not read_json(record_path(existing)).get('manual'):
+            raise ValueError('This pane is already managed; use its lifecycle hook.')
+        register(args.pane, args.agent, args.id)
+        tmux('set-option', '-p', '-t', args.pane, '@dotfiles_agent', args.agent)
+        print('Bound exact ID without restarting the pane. Rebind after changing conversations.')
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print('Agent recovery: ' + str(error), file=sys.stderr)
+        sys.exit(1)
