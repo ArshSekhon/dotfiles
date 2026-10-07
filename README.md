@@ -5,8 +5,8 @@ first verified platform. [AGENTS.md](AGENTS.md) records scope and decisions;
 [BOOTSTRAP.md](BOOTSTRAP.md) describes agent-run installation and preservation.
 Package installation and configuration application are separate operations.
 
-The `home/` source currently manages tmux, its workspace/scratch/recovery/task helpers, a zsh
-environment, and local tuicr reviews. Other platforms still need testing.
+The `home/` source currently manages tmux, its workspace/scratch/recovery/task helpers,
+zsh, Neovim, and local tuicr reviews. Other platforms still need testing.
 
 ## Zsh
 
@@ -49,8 +49,8 @@ changes, and small edits:
 
 Aliases apply to interactive zsh. Use `command cat` for the system command when
 you need its exact options. Plain `gd` remains available; `gdp` sets its pager
-for that invocation. Neovim uses native defaults; an editor plugin setup is future
-work. [bat](https://github.com/sharkdp/bat), [fd](https://github.com/sharkdp/fd),
+for that invocation. Neovim's native review/editing setup is described below.
+[bat](https://github.com/sharkdp/bat), [fd](https://github.com/sharkdp/fd),
 [ripgrep](https://github.com/BurntSushi/ripgrep),
 [zoxide](https://github.com/ajeetdsouza/zoxide), and
 [delta](https://github.com/dandavison/delta) are installed separately from config.
@@ -89,6 +89,79 @@ Preview only the requested shell files before applying them:
 ```sh
 chezmoi --source="$PWD" --no-pager diff ~/.zshenv ~/.zshrc
 chezmoi --source="$PWD" apply --dry-run ~/.zshenv ~/.zshrc
+```
+
+## Neovim
+
+`v file` or `nvim file` opens the native review/editing setup: absolute line numbers,
+current-line highlighting, a compact filename/position status line, and the built-in
+dark habamax theme. Search ignores case until you type capitals; substitutions
+preview their changes. Native filetype support and
+[EditorConfig](https://neovim.io/doc/user/editorconfig/) control project indentation,
+with four spaces as the fallback. No downloads or updates run in the editor.
+
+Native LSP connects Java (JDT LS), JS/TS/JSX/TSX (typescript-language-server), Rust
+(rust-analyzer), Python (Pyright), HTML, and Markdown (Marksman). Mermaid files and
+Markdown fences use built-in syntax highlighting. Servers start for matching files
+and reuse clients per project; large files skip LSP. Java and Rust use offline
+analysis defaults with automatic builds disabled. Fetch project dependencies outside
+the editor; private overrides can enable heavier analysis when needed.
+
+[fzf-lua](https://github.com/ibhagwan/fzf-lua), [Flash](https://github.com/folke/flash.nvim),
+[Gitsigns](https://github.com/lewis6991/gitsigns.nvim), and
+[Conform](https://github.com/stevearc/conform.nvim) load on their shortcuts. They provide
+fuzzy discovery, labeled jumps, changed-hunk navigation, and manual formatting.
+Native packages are installed separately; startup never fetches plugins.
+
+| Key / command | Action |
+| --- | --- |
+| Space, w / Space, q | Save / close the current window; unsaved edits require a decision |
+| Space, e | Browse files with native netrw; Enter opens, `-` goes to the parent |
+| Ctrl+p / Space, ff | Find project files; Ctrl+j/k moves, Enter opens, Esc cancels |
+| Space, fg / fb / fr | Search project text / open buffers / recent files |
+| Space, fs / fS | File / workspace symbols through LSP |
+| Space, j | Flash jump: type a target, then its label |
+| Space, fo | Start `:edit`; Tab completes file paths |
+| Space, / | Search from the current directory with ripgrep; results open in quickfix |
+| `:cnext` / `:cprev` / `:cclose` | Next / previous search result / close the results window |
+| Ctrl+h/j/k/l | Move between editor splits |
+| `:vsplit file` / `:split file` | Open a file beside / below the current window |
+| Space, y | Copy the current line, a count of lines, or a visual selection to the device clipboard |
+| Esc | Clear search highlighting in normal mode |
+| Space, ? / vc / vl | Cheatsheet / installed config / language settings |
+| `gd` / `K` / `grr` | Definition / hover / references; Ctrl+O returns |
+| `grn` / `gra` / Space, d | Rename / code action / line diagnostics |
+| Ctrl+Space (insert mode) | Request completion; Ctrl+n/p selects, Ctrl+y accepts |
+| Space, lt | Toggle language services; turn off for a plain review to release their resources |
+| Space, = | Format file/selection: Prettier for web/Markdown, Ruff for Python, rustfmt for Rust, JDT for Java |
+| Space, gf / gg / gh | Changed files / enable Git signs and hunk keys / preview hunk |
+| `]c` / `[c` | Next / previous changed hunk after Git signs attach |
+| `nvim -d old new` | Native side-by-side diff; `]c` / `[c` moves between changes |
+
+Over SSH, Space, y uses native OSC 52 on demand. Paste with the terminal's normal
+shortcut. Its escape sequences are verified in isolated terminals; delivery to
+Ghostty/RootShell still needs a local paste check. Other local terminals use Neovim's
+native clipboard provider. The SSH shortcut needs native OSC 52/getregion support;
+the Ubuntu pilot uses Neovim 0.12.5.
+
+[Persistent undo](https://neovim.io/doc/user/undo/#undo-persistence) lives in a private
+`stdpath('state')/undo` directory, outside checkouts. Native swap/crash recovery stays
+enabled. Returning to a buffer checks for external changes; `:checktime` checks
+manually. No background file watcher is added. Private overrides go in the unmanaged
+`~/.config/nvim/init.local.lua` (or `$XDG_CONFIG_HOME/nvim/init.local.lua`), loaded last.
+Space, ? describes server settings and limitations. Space, vc/vl opens installed
+configuration for inspection; edit `home/dot_config/nvim/` in this repository to
+keep managed changes. Formatting runs explicitly, without changing save behavior.
+Mermaid rendering is a separate tool; this setup edits/highlights diagram source.
+
+Preview/apply just the editor configuration:
+
+```sh
+chezmoi --source="$PWD" --no-pager diff --recursive ~/.config/nvim
+chezmoi --source="$PWD" apply --dry-run --recursive --parent-dirs ~/.config/nvim
+# After reviewing the preview and preserving existing settings:
+chezmoi --source="$PWD" apply --recursive --parent-dirs ~/.config/nvim
+nvim --headless -u NONE -c 'helptags ~/.config/nvim/doc' -c qa
 ```
 
 ## Existing tmux work

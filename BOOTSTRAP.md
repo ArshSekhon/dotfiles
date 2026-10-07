@@ -27,7 +27,10 @@ not targets.
 | CLI essentials | bat, fd, ripgrep, zoxide, delta, Neovim | Read files, find code, jump directories, inspect diffs, edit |
 | JSON inspection | jq | Inspect and transform structured CLI output; reuse a suitable existing installation |
 | Resource inspection | htop | Inspect agent/process CPU and memory on demand; reuse a suitable existing installation |
-| Future navigation/editor work | Neovim configuration, task worktrees/resource associations | Broader navigation/editor work remains planned |
+| Editor setup | Stable Neovim 0.11+, ripgrep, fzf; fzf-lua, Flash, Gitsigns, Conform | Native LSP/undo/clipboard; on-demand discovery, jumps, hunks, manual formatting |
+| Editor language services | typescript-language-server + compatible TypeScript, Pyright, vscode-langservers-extracted, rust-analyzer + rust-src, JDT LS + supported JDK, Marksman | Java/JS/TS/JSX/TSX/Rust/Python/HTML/Markdown analysis; Mermaid uses native syntax |
+| Explicit editor formatting | Prettier, Ruff, rustfmt; JDT LSP for Java | Format only on request; project settings apply |
+| Future task workflows | Task worktrees/resource associations | Broader task organization remains planned |
 
 Managed helper sources are `home/dot_local/bin/executable_tmux-workspace`,
 `executable_tmux-scratch`, `executable_tmux-agent`, `executable_tmux-tasks`, and `executable_tmux-review`
@@ -56,6 +59,49 @@ are preserved. Select suitable current official installation methods per platfor
 After explicit authorization, register the stable zsh path with the OS, change
 the account's login shell, and record `default-shell` in the private tmux override.
 Set the live server's default for future panes without replacing existing panes.
+
+Editor sources live under `home/dot_config/nvim/`: commented `init.lua`, the
+`lua/dotfiles/` language/plugin modules, and native `doc/dotfiles.txt` help. Apply
+them together, preserving existing configuration and the unmanaged `init.local.lua`.
+Respect XDG paths and inspect NVIM_APPNAME before application. Directory previews
+need `diff --recursive`; scoped first applies need `--parent-dirs` to create missing
+config ancestors. Generate help tags once
+after installation with `nvim --headless -u NONE -c 'helptags ~/.config/nvim/doc' -c qa`
+(adjust the path for XDG/NVIM_APPNAME). See README.md for scoped preview/application.
+Native filetype support/EditorConfig sets indentation. SSH copying uses native
+OSC 52/getregion; the pilot uses Neovim 0.12.5. Native LSP needs 0.11+; older editors
+retain basic editing without language clients. Plugin compatibility needs checking.
+
+Install editor plugins under `$XDG_DATA_HOME/nvim/site/pack/dotfiles/opt/` (default
+`~/.local/share/nvim/site/pack/dotfiles/opt/`). Use current stable Flash, Gitsigns,
+and Conform tags. Fzf-lua has no current stable release series: resolve and record
+a maintained upstream commit rather than its obsolete 0.7 tag. The pilot uses
+versioned checkouts with command-free package links; `packadd` runs only on first use.
+There is no startup plugin manager, network call, installation, or update.
+
+Resolve language-server/formatter versions from their official sources during
+bootstrap. Install the Node tools with the existing Node manager and a private npm
+prefix; preserve the lockfile and registry integrity metadata. Current
+[typescript-language-server](https://github.com/typescript-language-server/typescript-language-server)
+requires TypeScript 6's JavaScript server and Node 22.22.2+; use the newest compatible
+stable versions rather than installing incompatible TypeScript 7. Use official
+release digests for [Marksman](https://github.com/artempyanykh/marksman) and
+[Ruff](https://docs.astral.sh/ruff/installation/). Verify the stable
+[JDT LS milestone](https://github.com/eclipse-jdtls/eclipse.jdt.ls) checksum; its
+launcher requires Java 21+. Keep its launcher JDK separate from project JDKs and
+pass a private per-checkout/editor `-data` cache workspace to avoid simultaneous
+JVM lock conflicts. The pilot's versioned launcher records
+its JDK/path privately and provides `jdtls --version` without starting a JVM.
+
+Reuse mise ownership for Java/Rust installations without changing existing global
+runtime selections. Rust needs cargo/rustc, rust-analyzer, rust-src and rustfmt;
+resolve a stable toolchain and add those components during bootstrap. The pilot
+uses direct installed toolchain binaries as a stable fallback, with no rustup
+installation during editor startup. Select different project runtimes through mise
+and private LSP settings. Java/Rust defaults disable automatic builds/downloads;
+fetch/build project dependencies explicitly outside the editor. See the native
+cheatsheet for offline-analysis limits and override examples. Record all versions,
+paths, integrity/commits, command-link restoration and backups privately.
 
 ## Bootstrap procedure
 
@@ -172,3 +218,21 @@ suggestion acceptance, and fuzzy shortcuts in disposable terminal sessions.
 Measure first and repeated prompt readiness, first completion/navigation, and idle
 resource use with representative history/project sizes. Keep detailed pilot checks
 and machine-specific results outside Git; permanent plugin tests are unnecessary.
+
+## Editor verification
+
+Use isolated HOME and XDG config/data/state/cache directories. Load the managed
+configuration headlessly, then check browsing, project search/quickfix, filetype and
+EditorConfig indentation, undo across restarts, local overrides, and external edits.
+Check scoped chezmoi preview/dry-run/reruns and backup/restoration there first.
+Use disposable projects to check actual LSP diagnostics/navigation/completion for
+the configured languages, Markdown fences, Mermaid filetypes, manual formatting,
+and on-demand plugin shortcuts. Verify first installation creates missing parents
+and that cheatsheet/config keys work after generating help tags. Check missing
+dependencies leave native editing usable; keep installs out of checks.
+Use disposable terminals for split keys and normal/visual clipboard mappings;
+capture OSC 52 output without forwarding it to a real clipboard. Measure first paint,
+first navigation/search/plugin use, and idle CPU/memory against a clean baseline.
+Measure language-server first-use and resources separately from editor paint; Java
+and project indexing can be materially heavier. Keep detailed checks/results
+privately; configuration changes need no permanent upstream-plugin harness.

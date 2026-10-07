@@ -1,0 +1,94 @@
+*dotfiles.txt*                 Fast review/editing setup                 *dotfiles*
+
+Space is the leader. These are normal-mode keys unless indicated otherwise.
+Press q to close help, / to search it, Ctrl+] to follow a tag, Ctrl+O to return.
+
+CONFIG AND BASICS                                             *dotfiles-config*
+Space ?       This cheatsheet (:help dotfiles)
+Space vc      Open installed init.lua
+Space vl      Open installed language settings
+Space w/q     Write file / close window (native unsaved-change protection)
+Space e       Native file browser; Enter opens, - goes to parent
+Space fo      :edit path; Tab completes paths
+Ctrl+h/j/k/l  Move between splits
+Esc           Clear search highlights
+
+Managed files come from home/dot_config/nvim/ in the dotfiles repository.
+Edit those sources to persist changes; chezmoi overwrites installed files.
+Private machine/employer choices belong in init.local.lua beside init.lua,
+loaded last. You can override vim.lsp.config('server', {...}) or disable a server
+with vim.lsp.enable('server', false). Restart Neovim after configuration changes.
+No installation, update or dependency download runs during startup.
+
+FIND AND JUMP                                                  *dotfiles-find*
+Ctrl+p / Space ff   Find files in the current buffer's Git checkout
+Space fg           Search checkout text; respects Git ignore files
+Space fb/fr        Open buffers / recently opened files
+Space fs/fS        File symbols / workspace symbols (requires attached LSP)
+Space gf           Changed Git files
+Space j            Flash: type a target, then its label; Esc cancels
+Space /            Native :grep with ripgrep; :cnext/:cprev moves through results
+Ctrl+O / Ctrl+I    Back / forward through native jump history
+
+Fzf: Ctrl+j/k moves; Enter opens; Esc cancels; Ctrl+/ toggles file previews.
+Previews start hidden to keep initial selection fast. Native packages fzf-lua,
+Flash, Gitsigns and Conform load only when their shortcuts are used. Missing
+packages show a notice; native browsing, search and editing remain usable.
+
+LANGUAGES                                                     *dotfiles-languages*
+Java                 Eclipse JDT LS (jdtls); private workspace per checkout/editor
+JS/TS/JSX/TSX        typescript-language-server (ts_ls)
+Rust                 rust-analyzer (rust_analyzer); installed rust-src required
+Python               Pyright (pyright); use project pyrightconfig.json for venvs
+HTML                 vscode-html-language-server (html)
+Markdown             Marksman (marksman); links, references and headings
+Mermaid / .mmd       Built-in syntax, including fenced Markdown diagrams
+
+Native syntax also highlights code fences for all listed programming languages.
+Mermaid is edited as source; diagram rendering needs a separate preview tool.
+Language servers start only for matching filetypes, and reuse clients per project.
+Marksman needs a Git root or .marksman.toml for links across Markdown files.
+Files over 1 MiB or 20,000 lines skip LSP; syntax work stops past column 300.
+Java's launcher JDK is separate from project JDKs; set java.configuration.runtimes
+privately if your build targets another JDK. JDT launches require Java 21+.
+JDT indexes live in stdpath('cache')/jdtls, isolated for simultaneous editors;
+they can be removed when those editors are closed. First indexing costs extra.
+Rust builds/procedural macros and check-on-save are disabled; run cargo check
+deliberately. Java Maven/Gradle imports are offline; Gradle wrapper downloads,
+automatic builds and source downloads are disabled. Fetch/build dependencies
+outside the editor first. Enable heavier features in private overrides as needed.
+TypeScript automatic typing acquisition is disabled; install project types yourself.
+It uses one semantic worker rather than separate semantic/syntax workers.
+
+gd            Definition
+K             Hover documentation
+grr/gri/grt   References / implementation / type definition
+grn/gra       Rename / code action
+gO            Native file symbols
+[d / ]d       Previous / next diagnostic
+Space d       Show diagnostics for the current line
+Ctrl+Space    Request completion (insert mode); Ctrl+n/p selects, Ctrl+y accepts
+Ctrl+x Ctrl+o Native LSP completion fallback if terminal intercepts Ctrl+Space
+Ctrl+s        Signature help (insert mode, when terminal permits)
+Space lt      Toggle all installed language services; off releases their resources
+
+Space = formats the file or visual selection explicitly: Prettier for web files
+and Markdown, Ruff for Python, rustfmt for Rust, JDT LSP for Java. Saving does not
+format. Project formatter settings apply; :ConformInfo reports availability after
+first use. Native gg=G/gq remains available; Mermaid has no configured formatter.
+
+REVIEW, RECOVERY AND CLIPBOARD                                 *dotfiles-review*
+Space gg      Enable Git signs/hunk navigation for this editor session
+]c / [c       Next / previous changed hunk (after Git signs attach)
+Space gh      Preview changed hunk (after Git signs attach)
+nvim -d a b   Native diff; ]c/[c moves through changes
+Space y       Copy current line, counted lines or visual selection to device
+
+Over SSH, explicit copies use native OSC 52 without querying the clipboard.
+Ordinary y/p stay in native registers; paste from your terminal into insert mode.
+Delivery to your actual SSH terminal needs a local paste check.
+Undo persists privately under stdpath('state')/undo; swap recovery stays enabled.
+Unmodified buffers reload external changes when you return; :checktime checks now.
+No polling is added. Gitsigns starts event-based Git watching only after Space gg.
+
+ vim:tw=78:ts=8:ft=help:norl:

@@ -100,13 +100,15 @@ in BOOTSTRAP.md and machine-specific records outside Git.
 - Match verification to the behavior we own. Use short isolated checks for simple
   configurations; retain regression scripts for custom helpers with meaningful
   failure modes. Avoid maintaining tests of upstream tools and plugins.
+- Scoped chezmoi directory previews need `diff --recursive`; first application
+  needs `--parent-dirs` when ancestors are missing. Verify nested files explicitly.
 
 ## Implemented and verification
 
 Implemented: this guide and agent bootstrap instructions, the Claude import,
 a read-only inventory, minimal tuicr configuration, the shared tmux baseline,
 scratch tasks, an agent launcher with a folder picker, an on-demand task/agent
-switcher, and a minimal zsh setup.
+switcher, a minimal zsh setup, and a language-aware Neovim review/editing setup.
 .chezmoiroot selects home/ as the source.
 Run the inventory from the repo root with Python 3.8+:
 
@@ -161,8 +163,44 @@ completions are installed outside Git; jq 1.7 and htop 3.3.0 are reused.
 Focused current-source checks passed for aliases/plain piping, jumps, fd excludes,
 rg/delta, and scoped chezmoi preservation/reruns. Warm readiness measured ~54 ms,
 uncached ~242 ms, steady prompts ~24 ms, and a directory change plus prompt ~40 ms;
-idle CPU remained 0% in a one-second sample. Clean headless Neovim opened a
-3,000-line fixture in ~4–5 ms; interactive rendering/plugins are not measured.
+idle CPU remained 0% in a one-second sample. Editor measurements follow below.
+
+Neovim uses commented native defaults, EditorConfig, private persistent undo,
+external-edit checks, explicit SSH OSC 52 copying, and built-in help. Space `?`,
+`vc`, and `vl` open its cheatsheet, installed config, and language settings; managed
+edits belong in `home/dot_config/nvim/`, private overrides in `init.local.lua`.
+Native LSP supports Java, JS/TS/JSX/TSX, Rust, Python, HTML and Markdown. Mermaid
+and language fences use native syntax; an after/ftplugin override stops Neovim
+0.12's default Markdown Treesitter highlighting so the configured fences apply.
+Servers reuse clients per project; files over 1 MiB/20,000 lines skip LSP. Java/Rust
+analysis is offline, without automatic builds; project dependencies need separate
+fetch/build steps. Java indexes use private per-checkout/editor caches to avoid
+concurrent JVM workspace locks. Space `lt` disables/re-enables installed services.
+Fzf-lua, Flash, Gitsigns and Conform load on shortcuts as native optional packages;
+no editor installs/updates/network calls are configured. Git watching starts only
+after Space `gg`. Space `=` formats manually with Prettier, Ruff, rustfmt or JDT.
+See README.md and BOOTSTRAP.md for keys, installation, compatibility and limits.
+
+Ubuntu editor pilot, 2026-10-06, Neovim 0.12.5: current-source isolated checks passed
+for every server's diagnostics/semantic navigation, all listed fenced languages,
+Mermaid filetypes, every formatter, actual fuzzy file/text selection, labeled jumps,
+Git hunks, help/config keys, LSP toggling, private overrides, missing packages,
+recursive chezmoi previews/dry-runs/reruns and conflict restoration. Native undo,
+external changes, split navigation, and mapped UTF-8 line/visual OSC 52 sequences
+passed disposable headless/PTY checks; real Neovim SSH clipboard delivery remains
+unverified. First paint: clean/configured warm medians ~51/57 ms at 3,000 lines,
+~54/62 ms at 30,000; configured first runs ~60/66 ms. File picker ~45–50 ms,
+text search ~71–138 ms; a Markdown fixture with all nine fenced syntaxes painted
+in ~157 ms, and explicit Ruff formatting took ~13–15 ms. A one-second idle sample
+of the editor plus Pyright measured 0% CPU/~185 MiB RSS. Initial budgets: warm
+code first paint/file picker 100 ms, text search/fenced Markdown 200 ms;
+no custom idle polling.
+Language-service readiness is separate: small fixtures took ~0.35–1.25 s except
+Java (~4.1–4.5 s). Editor/server memory sampled ~107–752 MiB; one TypeScript worker
+reduced its fixture from ~500 to ~294 MiB. Actual projects, concurrent editor/agent
+load, physical terminals, macOS and Amazon Linux still need measurement. Installed
+versions, integrity/commits, backups and detailed checks stay in private state;
+no permanent upstream-plugin verification harness is maintained.
 
 The tmux baseline uses Ctrl+A, stable task names, current-directory windows/splits,
 vi copy mode, OSC 52 support, and a compact native Tokyo Night bottom status line
@@ -387,7 +425,10 @@ These are observed versions, not installation targets; tmux is now applied as ab
 3. Minimal zsh and project/file navigation with performance measurements; verify
    clipboard with the actual terminal/SSH client. Zsh and fuzzy shell navigation
    are implemented; broader navigation and review/worktree feature choices remain.
-4. Minimal Neovim review/editing setup; measure representative projects before plugins.
+4. **Implemented on Ubuntu:** Neovim language services, on-demand navigation/review
+   plugins, manual formatting and self-documenting config/help. Native and plugin
+   fixture measurements are recorded above; representative projects, simultaneous
+   editors/agents, physical terminal behavior and other platforms remain to verify.
 5. Verify onboarding on the personal MacBook, then work devices.
 
 Open discovery: checkout roots, existing agent/worktree/session practices, terminal
