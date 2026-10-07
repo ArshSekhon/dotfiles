@@ -1,0 +1,96 @@
+TMUX SHORTCUTS
+j/k scroll   / search   q close
+Single uppercase keys use Shift: N = Shift+n.
+
+TMUX  |  Press Ctrl+A, then a key
+------------------------------------------------------
+  Agents & tasks
+    N               Launch agent / scratch task
+    g               Find tasks and agent panes
+    r               Review the current task
+
+  Switch
+    B               Previous task
+    b               Previous session
+    Tab             Previous window
+    s / w           Session / window picker
+
+  Windows & panes
+    c               New shell window (current folder)
+    | / -           Shell split: beside / below
+    h / j / k / l   Move left / down / up / right
+    H / J / K / L   Resize left / down / up / right
+    z               Zoom / unzoom pane
+
+  Copy & settings
+    [               Copy mode (v selects, y copies)
+    ?               This cheatsheet
+    R               Reload configuration
+    Ctrl+A          Send Ctrl+A to the application
+
+WORKSPACE  |  Ctrl+A N
+------------------------------------------------------
+  Inside popup: no prefix. Last agent is remembered.
+  t                 Scratch task in a private folder
+  p                 New agent pane (current folder)
+  P                 Named agent pane (current folder)
+  s                 Named session (current folder)
+  f                 Pick a folder for a new session
+  g                 Find existing work
+  j/k               Choose a menu item
+  h/l               Switch Codex / Claude
+  Enter             Open selected item
+  Esc/q             Back / cancel
+  While naming (letters enter text):
+  Ctrl+U            Clear name
+  Ctrl+F            Change folder (new session)
+  Enter/Esc         Open / back
+
+TASK SWITCHER  |  Ctrl+A g
+------------------------------------------------------
+  Inside popup: type to search; actions use selection.
+  Ctrl+j/k          Move through results
+  Esc               Cancel
+  Enter             Jump to selected pane
+  Alt+s             Shell split in its folder
+  Ctrl+R            Review selected task
+  Alt+n             Rename pane
+  Alt+a             Hide / unhide (keeps running)
+  Alt+h             Include hidden panes
+  Ctrl+L            Refresh results
+  Alt+b             Previous task
+
+FOLDER PICKER  |  Workspace f
+------------------------------------------------------
+  Type to search, or enter ~, /path, ./path, ../path.
+  Ctrl+j/k          Move through results
+  Esc               Back
+  Enter             Choose folder
+  Tab               Browse one level
+  Alt+h             Parent folder
+
+LOCAL REVIEW  |  Ctrl+A r
+------------------------------------------------------
+  Inside Tuicr: comments stay private.
+  ?                 Tuicr help
+  c / C             Line / file comment
+  v then c          Range comment
+  Tab / ;l          Next panel / focus diff on right
+  Enter             Save comment
+  Ctrl+j            Newline in comment
+  ZZ                Export; open feedback actions
+  :q                Exit without exporting
+
+FEEDBACK  |  After exporting with ZZ
+------------------------------------------------------
+  p                 Prepare prompt in the exact agent
+  v                 View saved feedback
+  r                 Review again
+  q                 Close
+  Enter (agent)     Send prepared prompt when ready
+  Prepare checks the conversation and Git revision.
+
+COPY MODE  |  After Ctrl+A [
+------------------------------------------------------
+  v                 Select in copy mode
+  y                 Copy to device clipboard; exit

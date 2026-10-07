@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""Private local reviews tied to a selected tmux task and exact conversation."""
+
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import runpy
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import uuid
+
+KEYS = runpy.run_path(str(Path(__file__).with_name('tmux_keys.py')))
+
+
+def sibling(name):
+    return runpy.run_path(str(Path(__file__).with_name(name)))
+
+
+def git(directory, *args, allow_failure=False):
+    env = dict(os.environ, GIT_OPTIONAL_LOCKS='0')
+    result = subprocess.run(['git', '-C', str(directory)] + list(args),
+                            capture_output=True, env=env, timeout=30)
+    if result.returncode and not allow_failure:
+        raise ValueError('Git could not read this checkout: ' + result.stderr.decode(errors='replace').strip())
+    return result
+
+
+def revision(directory):
+    """On-demand fingerprint, including staged/unstaged and untracked content."""
+    digest = hashlib.sha256()
+    head = git(directory, 'rev-parse', '--verify', 'HEAD', allow_failure=True)
+    digest.update(head.stdout)
+    options = ['diff', '--no-ext-diff', '--no-textconv', '--binary']
+    for args in (options + ['--cached', '--'], options + ['--']):
+        output = git(directory, *args).stdout
+        digest.update(len(output).to_bytes(8, 'big'))
+        digest.update(output)
+    paths = git(directory, 'ls-files', '--others', '--exclude-standard', '-z').stdout
+    size = 0
+    for raw in paths.split(b'\0'):
+        if not raw:
+            continue
+        path = Path(directory) / os.fsdecode(raw)
+        digest.update(raw + b'\0')
+        content = hashlib.sha256()
+        if path.is_symlink():
+            content.update(os.fsencode(os.readlink(path)))
+        else:
+            with path.open('rb') as stream:
+                while True:
+                    block = stream.read(1024 * 1024)
+                    if not block:
+                        break
+                    size += len(block)
+                    if size > 64 * 1024 * 1024:
+                        raise ValueError('Untracked review files exceed 64 MiB; ignore generated files first.')
+                    content.update(block)
+        digest.update(content.digest())
+    return {'head': head.stdout.decode().strip() or 'unborn', 'fingerprint': digest.hexdigest()}
+
+
+def private_directory(path):
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.is_symlink() or not path.is_dir() or path.stat().st_uid != os.getuid():
+        raise ValueError('Review state must be an owned directory, not a symlink.')
+    path.chmod(0o700)
+
+
+def save(path, data):
+    descriptor, temporary = tempfile.mkstemp(prefix='.review-', dir=str(path.parent))
+    try:
+        with os.fdopen(descriptor, 'w') as stream:
+            stream.write(data)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def state_root():
+    state = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state')))
+    if not state.is_absolute():
+        raise ValueError('XDG_STATE_HOME must be absolute.')
+    parent = state
+    while not parent.exists():
+        parent = parent.parent
+    if git(parent, 'rev-parse', '--is-inside-work-tree', allow_failure=True).stdout.strip() == b'true':
+        raise ValueError('Keep XDG_STATE_HOME outside Git checkouts.')
+    root = state / 'dotfiles/reviews'
+    private_directory(root)
+    return root
+
+
+def selected(run, client, source):
+    tasks = sibling('tmux-tasks')
+    if re.fullmatch(r'%[0-9]+', source):
+        current = tasks['current_target'](run, client)
+        candidates = [pane for pane in tasks['inventory'](run) if pane['pane_id'] == source]
+        if not candidates:
+            raise ValueError('The review pane closed.')
+        pane = next((pane for pane in candidates if pane['target'] == current), candidates[0])
+    else:
+        pane = tasks['find_target'](run, source)
+    folder = tasks['working_folder'](pane)
+    repo = git(folder, 'rev-parse', '--show-toplevel').stdout.decode().strip()
+    pane['repo'] = str(Path(repo).resolve())
+    pane['pid'] = run('display-message', '-p', '-t', pane['target'], '#{pane_pid}')
+    pane['record'] = run('show-options', '-pqv', '-t', pane['target'], '@dotfiles_agent_record')
+    pane['conversation'] = None
+    if pane['record']:
+        recovery = sibling('tmux-agent')
+        record = recovery['read_json'](recovery['record_path'](pane['record']))
+        if record.get('agent') != pane['@dotfiles_agent'] or record.get('token') != pane['record']:
+            raise ValueError('Agent metadata does not match the selected pane.')
+        if recovery['valid_id'](record.get('session_id')):
+            pane['conversation'] = record['session_id']
+    return pane
+
+
+def task_directory(pane, socket):
+    identity = [pane['repo'], pane['record'], pane['conversation']]
+    if not pane['record']:
+        identity.extend([socket, pane['target'], pane['pid']])
+    digest = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:32]
+    path = state_root() / digest
+    private_directory(path)
+    return path
+
+
+def review_environment(directory):
+    # Linux tuicr honors XDG_DATA_HOME. Preserve HOME for Git's global config
+    # and ~ paths; the editor restores its normal data/cache paths. macOS's
+    # ProjectDirs ignores XDG_DATA_HOME, so its isolation needs a separate rollout.
+    if sys.platform != 'linux':
+        raise ValueError('Private review isolation is verified on Linux only; use tuicr -w until platform setup.')
+    env = os.environ.copy()
+    originals = {key: env.get(key) for key in
+                 ('HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME')}
+    env['DOTFILES_REVIEW_EDITOR_ENV'] = json.dumps(originals)
+    env['XDG_CONFIG_HOME'] = env.get('XDG_CONFIG_HOME', str(Path.home() / '.config'))
+    for key, folder in [('XDG_DATA_HOME', 'data'),
+                        ('XDG_STATE_HOME', 'state'), ('XDG_CACHE_HOME', 'cache')]:
+        path = directory / folder
+        private_directory(path)
+        env[key] = str(path)
+    return env
+
+
+def export_review(pane, directory, executable):
+    before = revision(pane['repo'])
+    versions = directory / 'revisions'
+    private_directory(versions)
+    version = versions / before['fingerprint']
+    private_directory(version)
+    descriptor, temporary = tempfile.mkstemp(prefix='.export-', dir=str(directory))
+    try:
+        with os.fdopen(descriptor, 'w') as stream:
+            result = subprocess.run([executable, '-w', '--stdout', '--no-update-check'],
+                                    cwd=pane['repo'], env=review_environment(version), stdout=stream)
+        if result.returncode:
+            raise ValueError('Tuicr exited with status ' + str(result.returncode) + '; saved comments remain private.')
+        exported = Path(temporary).read_text()
+        if not exported.strip():
+            return None
+        review_id = str(uuid.uuid4())
+        path = directory / (review_id + '.md')
+        task = sibling('tmux-tasks')['safe_label'](pane['@dotfiles_pane_name'] or pane['window_name'])
+        header = ('# Local feedback: ' + task + '\n\n'
+                  + 'Checkout: ' + pane['repo'] + '\n'
+                  + 'Conversation: ' + (pane['@dotfiles_agent'] or 'unmanaged') + ' '
+                  + (pane['conversation'] or '(no exact ID captured)') + '\n'
+                  + 'HEAD: ' + before['head'] + '\n'
+                  + 'Revision fingerprint: ' + before['fingerprint'] + '\n\n')
+        save(path, header + exported)
+        context = {key: pane[key] for key in ('target', 'pid', 'record', 'conversation', 'repo')}
+        context.update(before, feedback=str(path), tool=pane['@dotfiles_agent'],
+                       task=pane['session_name'] + ' / ' + task)
+        save(directory / (review_id + '.json'), json.dumps(context, sort_keys=True) + '\n')
+        return context
+    finally:
+        Path(temporary).unlink()
+
+
+def prepare(run, client, context):
+    if not context['conversation'] or context['tool'] not in ('codex', 'claude'):
+        raise ValueError('No exact conversation ID captured. Bind/trust the recovery hook, then review again.')
+    pane = selected(run, client, context['target'])
+    for key in ('pid', 'record', 'conversation', 'repo'):
+        if pane[key] != context[key]:
+            raise ValueError('The selected conversation changed; review again before preparing feedback.')
+    if pane['pane_dead'] == '1':
+        raise ValueError('The selected agent exited; feedback stays saved.')
+    if pane['pane_current_command'] not in ('codex', 'claude', 'node'):
+        raise ValueError('Return the selected pane to its agent before preparing feedback.')
+    if run('display-message', '-p', '-t', pane['target'], '#{pane_in_mode}') != '0':
+        raise ValueError('Leave copy mode in the selected agent before preparing feedback.')
+    if revision(context['repo'])['fingerprint'] != context['fingerprint']:
+        raise ValueError('The checkout changed during/after review; review again before preparing feedback.')
+    path = context['feedback']
+    if any(not character.isprintable() for character in path):
+        raise ValueError('The feedback path contains unsupported control characters.')
+    # A single line, bracketed paste, no Enter. User controls submission.
+    prompt = ('Read the private local review feedback in ' + shlex.quote(path)
+              + '. Address each comment for this task and report what changed and what you verified.')
+    name = 'dotfiles-review-' + str(uuid.uuid4())
+    socket = os.environ['DOTFILES_TMUX_SOCKET']
+    result = subprocess.run(['tmux', '-S', socket, 'load-buffer', '-b', name, '-'],
+                            input=prompt, capture_output=True, text=True, timeout=5)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or 'Could not prepare the feedback buffer.')
+    try:
+        run('paste-buffer', '-p', '-b', name, '-t', pane['target'])
+    finally:
+        run('delete-buffer', '-b', name)
+    # Closing/jumping happens after validation and paste; preserve client context.
+    tasks = sibling('tmux-tasks')
+    if tasks['current_target'](run, client) == pane['target']:
+        run('display-popup', '-C', '-c', client)
+    else:
+        tasks['jump'](run, client, pane, popup=True)
+
+
+def choose(context, message=''):
+    import curses
+    import textwrap
+    os.environ.setdefault('ESCDELAY', '25')
+
+    def menu(screen):
+        screen.keypad(True)
+        try:
+            curses.curs_set(0)
+        except curses.error:
+            pass
+        while True:
+            screen.erase()
+            height, width = screen.getmaxyx()
+            lines = ['Feedback saved privately', '',
+                     'For: ' + (context['tool'] or 'unmanaged') + ' / ' + context['task'],
+                     KEYS['action_key'](KEYS['REVIEW_ACTIONS'], 'prepare')
+                     + ' pastes a prompt in this agent. Enter sends it.',
+                     'Clear any existing agent draft before preparing.', '']
+            lines += [key + '  ' + label for key, (_, label) in KEYS['REVIEW_ACTIONS'].items()]
+            if message:
+                lines += [''] + textwrap.wrap(message, max(1, width - 4))
+            for row, line in enumerate(lines[:height - 1]):
+                screen.addnstr(row, 2, line, max(1, width - 4), curses.A_BOLD if row == 0 else 0)
+            screen.refresh()
+            key = screen.getch()
+            if key in (3, 27):
+                return 'close'
+            if 0 <= key < 256 and chr(key) in KEYS['REVIEW_ACTIONS']:
+                return KEYS['REVIEW_ACTIONS'][chr(key)][0]
+    return curses.wrapper(menu)
+
+
+def main():
+    if sys.argv[1:2] == ['--edit']:
+        env = os.environ.copy()
+        original = json.loads(env.pop('DOTFILES_REVIEW_EDITOR_ENV', '{}'))
+        for key, value in original.items():
+            if key not in ('HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME'):
+                raise ValueError('Unexpected editor environment key.')
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
+        os.execvpe('nvim', ['nvim'] + sys.argv[2:], env)
+    if sys.argv[1:]:
+        raise ValueError('Usage: tmux-review [--edit <editor arguments>]')
+    client = os.environ.get('DOTFILES_TMUX_CLIENT')
+    socket = os.environ.get('DOTFILES_TMUX_SOCKET')
+    source = os.environ.get('DOTFILES_TMUX_PANE')
+    if not client or not socket or not source:
+        raise ValueError('Open a review with Ctrl+A r, or Ctrl+R in the task switcher.')
+    executable = shutil.which('tuicr')
+    if not executable:
+        raise ValueError('Install tuicr to review local changes (see BOOTSTRAP.md).')
+
+    def run(*args):
+        result = subprocess.run(['tmux', '-S', socket] + list(args),
+                                capture_output=True, text=True, timeout=5)
+        if result.returncode:
+            raise ValueError(result.stderr.strip() or 'tmux command failed')
+        return result.stdout.rstrip('\n')
+
+    sibling('tmux-tasks')['client_context'](run, client)
+    pane = selected(run, client, source)
+    directory = task_directory(pane, socket)
+    descriptor = os.open(str(directory / 'review.lock'), os.O_CREAT | os.O_RDWR
+                         | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    with os.fdopen(descriptor, 'w') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError('This task already has a review open.')
+        while True:
+            pane = selected(run, client, source)
+            # A changed conversation needs a fresh popup/task store, not old comments.
+            if task_directory(pane, socket) != directory:
+                raise ValueError('The conversation changed; reopen the review for its new task.')
+            context = export_review(pane, directory, executable)
+            if context is None:
+                return
+            message = ''
+            while True:
+                action = choose(context, message)
+                message = ''
+                if action == 'close':
+                    return
+                if action == 'again':
+                    break
+                if action == 'view':
+                    env = dict(os.environ, LESS='', LESSOPEN='', LESSCLOSE='',
+                               LESSHISTFILE='-', LESSSECURE='1')
+                    subprocess.run(['less', '-i', context['feedback']], env=env)
+                if action == 'prepare':
+                    try:
+                        prepare(run, client, context)
+                        return
+                    except ValueError as error:
+                        message = str(error)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print('Local review: ' + str(error), file=sys.stderr)
+        sys.exit(1)

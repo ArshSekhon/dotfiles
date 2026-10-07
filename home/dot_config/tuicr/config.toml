@@ -1,6 +1,6 @@
 theme = "tokyo-night-storm"
 diff_view = "side-by-side"
-editor = "nvim"
+editor = "tmux-review --edit"
 ignore_whitespace = false
 transparent_background = false
 

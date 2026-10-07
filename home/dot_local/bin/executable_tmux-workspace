@@ -13,6 +13,9 @@ import sys
 import tempfile
 
 
+KEYS = runpy.run_path(str(Path(__file__).with_name("tmux_keys.py")))
+
+
 def preference_path():
     state = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state")))
     if not state.is_absolute():
@@ -183,16 +186,14 @@ def pick_folder(current):
         env.pop(key, None)
     while True:
         labels = {str(path): str(path) for path in candidates}
-        header = "Enter choose / Esc back / Ctrl+j/k move\nTab browse / Alt+h parent / ~ home"
+        header = KEYS["action_hint"](KEYS["FOLDER_ACTIONS"]) + "\nCtrl+j/k move / Esc back / ~ home"
         if message:
             header += "\n" + message
         result = subprocess.run(
             [executable, "--read0", "--print0", "--print-query", "--no-multi",
              "--layout=reverse", "--border=none", "--info=inline", "--scheme=path", "--keep-right",
              "--prompt=Folder > ", "--header=" + header, "--query=" + query,
-             "--bind=ctrl-j:down,ctrl-k:up,enter:print(choose)+wait+accept,"
-             "tab:print(browse)+wait+accept,alt-h:print(parent)+accept,"
-             "double-click:print(choose)+wait+accept",
+             "--bind=" + KEYS["fzf_bindings"](KEYS["FOLDER_ACTIONS"]),
              # Expand a leading ~ using a tiny shell builtin; other ~ keys insert normally.
              "--with-shell=/bin/sh -c",
              "--bind=~:transform:if [ -z \"$FZF_QUERY\" ]; then "
@@ -274,9 +275,14 @@ def launch_menu(current):
                 selected = curses.color_pair(2) | curses.A_BOLD
                 muted = curses.color_pair(3)
                 screen.bkgd(" ", curses.color_pair(4))
-        actions = (("scratch", "[t] Scratch task (private folder)"),
-                   ("pane", "[p/P] New agent pane (current folder)"),
-                   ("session", "[s] New session (current folder)"))
+        action_keys = KEYS["WORKSPACE_ACTIONS"]
+        actions = []
+        for token in ("scratch", "pane", "session"):
+            shortcut = KEYS["action_key"](action_keys, token)
+            keys = shortcut
+            if token == "pane":
+                keys += "/" + KEYS["action_key"](action_keys, "named-pane")
+            actions.append((token, "[" + keys + "] " + action_keys[shortcut][1]))
         action, agent, editing, name, directory = 0, default, False, "", current
         while True:
             screen.erase()
@@ -302,9 +308,9 @@ def launch_menu(current):
                 if len(folder) > width - 12:
                     folder = "..." + folder[-max(1, width - 15):]
                 line(5, "Folder: " + folder if actions[action][0] == "session" else description, muted)
-                line(7, "Enter open   Esc back   Ctrl+C cancel", muted)
+                line(7, KEYS["name_hint"](), muted)
                 if actions[action][0] == "session":
-                    line(9, "Ctrl+F choose folder", muted)
+                    line(9, KEYS["key_label"](next(key for key, action in KEYS["NAME_KEYS"].items() if action == "folder")) + " choose folder", muted)
                 screen.move(min(3, height - 1), min(8 + len(name), width - 2))
             else:
                 line(1, "Open workspace", blue)
@@ -313,53 +319,66 @@ def launch_menu(current):
                          selected if action == index else 0)
                 options = "[Codex]  Claude" if agent == "codex" else " Codex  [Claude]"
                 line(7, "Agent for new launches: " + options, blue)
-                line(8, "P named pane   f session in another folder", muted)
-                line(9, "j/k choose   h/l agent   Enter open   Esc cancel", muted)
+                line(8, KEYS["action_hint"]({KEYS["action_key"](action_keys, token): action_keys[KEYS["action_key"](action_keys, token)]
+                                             for token in ("named-pane", "folder", "tasks")}), muted)
+                line(9, KEYS["workspace_hint"](), muted)
             screen.refresh()
             choose_folder = False
             key = screen.getch()  # Block until input: no polling or idle redraw loop.
+            named_key = {10: "Enter", 13: "Enter", curses.KEY_ENTER: "Enter", 27: "Esc",
+                         curses.KEY_DOWN: KEYS["navigation_key"]("down"),
+                         curses.KEY_UP: KEYS["navigation_key"]("up"),
+                         curses.KEY_LEFT: KEYS["navigation_key"]("agent"),
+                         curses.KEY_RIGHT: KEYS["navigation_key"]("agent")}.get(key,
+                         "Ctrl+" + chr(64 + key) if 0 < key < 27 else
+                         chr(key) if 0 <= key < 256 else "")
+            navigation = KEYS["WORKSPACE_NAVIGATION"].get(named_key)
+            name_action = KEYS["NAME_KEYS"].get(named_key)
+            shortcut = KEYS["WORKSPACE_ACTIONS"].get(named_key, (None, ""))[0]
             if key in (3, 4):
                 return None
             if editing:
-                if key == 27:
+                if name_action == "back":
                     editing = False
                     directory = current
-                elif key in (10, 13, curses.KEY_ENTER):
+                elif name_action == "open":
                     return (actions[action][0], agent, name,
                             directory if actions[action][0] == "session" else current) if name.strip() else None
-                elif key == 6 and actions[action][0] == "session":
+                elif name_action == "folder" and actions[action][0] == "session":
                     choose_folder = True
                 elif key in (8, 127, curses.KEY_BACKSPACE, curses.KEY_DC):
                     name = name[:-1]
-                elif key == 21:
+                elif name_action == "clear":
                     name = ""
                 elif 32 <= key < 127 and len(name) < 64:
                     name += chr(key)
-            elif key in (27, ord("q")):
+            elif navigation == "cancel":
                 return None
-            elif key in (ord("j"), curses.KEY_DOWN):
+            elif navigation == "down":
                 changed = min(action + 1, len(actions) - 1)
                 if changed != action:
                     name = ""
                 action = changed
-            elif key in (ord("k"), curses.KEY_UP):
+            elif navigation == "up":
                 changed = max(action - 1, 0)
                 if changed != action:
                     name = ""
                 action = changed
-            elif key in (ord("h"), ord("l"), curses.KEY_LEFT, curses.KEY_RIGHT):
+            elif navigation == "agent":
                 agent = "claude" if agent == "codex" else "codex"
-            elif key == ord("f"):
+            elif shortcut == "tasks":
+                return "tasks", agent, None, current
+            elif shortcut == "folder":
                 action, name, choose_folder = 2, "", True
-            elif key in (ord("t"), ord("p"), ord("P"), ord("s")):
-                chosen = {ord("t"): 0, ord("p"): 1, ord("P"): 1, ord("s"): 2}[key]
+            elif shortcut in ("scratch", "pane", "named-pane", "session"):
+                chosen = {"scratch": 0, "pane": 1, "named-pane": 1, "session": 2}[shortcut]
                 if chosen != action:
                     name = ""
                 action = chosen
-                if actions[action][0] == "pane" and key != ord("P"):
+                if actions[action][0] == "pane" and shortcut != "named-pane":
                     return "pane", agent, None, current
                 editing = True
-            elif key in (10, 13, curses.KEY_ENTER):
+            elif navigation == "open":
                 if actions[action][0] == "pane":
                     return "pane", agent, None, current
                 editing = True
@@ -436,6 +455,10 @@ def main():
         if result is None:
             return
         action, choice, name, directory = result
+        if action == "tasks":
+            tasks = runpy.run_path(str(Path(__file__).with_name("tmux-tasks")))
+            tasks["open_popup"](run, client, socket)
+            return
         if action == "scratch":
             scratch = runpy.run_path(str(Path(__file__).with_name("tmux-scratch")))
             scratch["main"](name=name, agent_choice=choice)

@@ -18,20 +18,22 @@ not targets.
 | --- | --- | --- |
 | Configuration management | Git, chezmoi | Repository access, configuration preview/application |
 | Shared tmux setup | tmux | Sessions, panes, popups; verified with 3.4, other versions need checks |
-| Workspace/scratch helpers | Python 3.8+ with curses, tmux, Git | Launcher UI and scratch-folder safety; apply the tmux configuration and all three helpers together |
+| Shortcut cheatsheet | less | On-demand scrolling/search; manage ~/.config/tmux/cheatsheet.txt with the tmux configuration |
+| Workspace/scratch helpers | Python 3.8+ with curses, tmux, Git | Launcher UI and scratch-folder safety; apply the tmux configuration and all five helpers plus `tmux_keys.py` together |
 | Agent launching/recovery | Selected Codex and/or Claude Code CLI with SessionStart hooks; tmux-resurrect for layouts | Available in tmux's PATH; exact IDs and credentials stay private |
-| Fuzzy selection | fzf | Shell history/file/directory selection, zoxide's `zi`, tmux folder picker, and the full tmux verification suite |
-| Local reviews | tuicr, Neovim (`nvim`), Git | Local line/range comments and review export; tmux review popup and its configured editor |
+| Fuzzy selection | fzf | Shell history/file/directory selection, zoxide's `zi`, tmux folder/task pickers, and the full tmux verification suite |
+| Local reviews | tuicr, Neovim (`nvim`), Git, less | Private local comments/export and guarded feedback preparation; the editor wrapper keeps normal Neovim paths |
 | Interactive shell | Current stable Zsh, zsh-autosuggestions, zsh-syntax-highlighting; fzf integration; fd/fdfind when available | Native Vim editing/completion/history, suggestions/highlighting, on-demand fuzzy navigation |
 | CLI essentials | bat, fd, ripgrep, zoxide, delta, Neovim | Read files, find code, jump directories, inspect diffs, edit |
 | JSON inspection | jq | Inspect and transform structured CLI output; reuse a suitable existing installation |
 | Resource inspection | htop | Inspect agent/process CPU and memory on demand; reuse a suitable existing installation |
-| Future navigation/editor work | Neovim configuration, task/resource navigation | Broader navigation/editor work remains planned |
+| Future navigation/editor work | Neovim configuration, task worktrees/resource associations | Broader navigation/editor work remains planned |
 
 Managed helper sources are `home/dot_local/bin/executable_tmux-workspace`,
-`executable_tmux-scratch`, and `executable_tmux-agent`. Chezmoi's [`executable_` attribute](https://www.chezmoi.io/reference/source-state-attributes/)
+`executable_tmux-scratch`, `executable_tmux-agent`, `executable_tmux-tasks`, and `executable_tmux-review`
+with the shared `tmux_keys.py` catalog. Chezmoi's [`executable_` attribute](https://www.chezmoi.io/reference/source-state-attributes/)
 marks executable permissions; the installed commands are `~/.local/bin/tmux-workspace`
-`~/.local/bin/tmux-scratch`, and `~/.local/bin/tmux-agent`.
+`~/.local/bin/tmux-scratch`, `~/.local/bin/tmux-agent`, `~/.local/bin/tmux-tasks`, and `~/.local/bin/tmux-review`.
 When updating an older setup, back up the retired `dotfiles-agent` and
 `dotfiles-scratch` helper files and remove them after verifying the new bindings.
 
@@ -90,7 +92,7 @@ When asked to bootstrap:
 
 ## Agent recovery setup
 
-Apply the tmux configuration and all three helpers together. Install tmux-resurrect
+Apply the tmux configuration and all five helpers plus `tmux_keys.py` together. Install tmux-resurrect
 and optionally continuum separately; keep the pilot's existing private TPM loader.
 The shared config uses resurrect's post-save-layout hook to replace only managed
 agent commands with immutable recovery snapshots. Private overrides load last;
@@ -131,6 +133,33 @@ private server restart, real plugin restore, duplicate/missing-state failures,
 manual adoption, private settings merging/backups, and repeatability. Use
 `python3 scripts/verify-tmux.py` for launcher/picker checks. No real conversations
 or reboot are exercised by these scripts; verify an actual recovery deliberately.
+
+## Review and shortcut verification
+
+The private review wrapper currently requires Linux XDG storage. macOS tuicr uses
+Library/Application Support; implement/verify isolation there before applying the
+wrapper (plain `tuicr -w` is available). Preserve HOME/Git ignore settings; changing
+HOME can silently change which files get reviewed.
+
+Resolve the latest stable [tuicr release](https://github.com/agavra/tuicr/releases/latest)
+at installation; verify the official asset digest before placing a versioned binary
+and command link on PATH. Apply its config, `tmux-review`, the other helpers,
+`tmux_keys.py`, and generated cheatsheet together. The managed editor command
+`tmux-review --edit` restores normal HOME/XDG settings before opening Neovim.
+
+For key changes, run `python3 scripts/sync-tmux-keys.py`, then its `--check` mode.
+Do not edit the generated block/sheet directly. CI checks generation with Python alone;
+private tmux overrides/plugins can add or replace bindings and need a machine check.
+Review ergonomics, terminal collisions, and selected-task identity when adding keys.
+Task actions use Alt+s (shell), Ctrl+R (review), Alt+n (name), Alt+b (previous),
+Alt+a/Alt+h (hide/show), and Ctrl+L (refresh); ordinary query editing stays available.
+
+Run `python3 scripts/verify-reviews.py` with installed tuicr, or `--tuicr /path/to/tuicr`
+for a temporary binary. The Linux fake-agent fixture exercises real tuicr, private
+exports/comments, revision isolation, ID/revision refusal, Neovim environment,
+no-Enter preparation, and narrow/wide terminals. Also run tmux/task checks and
+scoped chezmoi preview/dry-run/reruns/restoration. Verify real agent input deliberately;
+these checks never send feedback to a real conversation. Actual SSH clipboard is separate.
 
 ## Shell verification
 

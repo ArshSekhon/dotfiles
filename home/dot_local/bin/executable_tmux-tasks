@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""Find existing tmux work on demand; never inspect terminal output or agent history."""
+
+import hashlib
+import os
+from pathlib import Path
+import re
+import runpy
+import shlex
+import shutil
+import subprocess
+import sys
+
+
+KEYS = runpy.run_path(str(Path(__file__).with_name("tmux_keys.py")))
+
+
+FIELDS = (
+    "session_id", "session_name", "window_id", "window_index", "window_name",
+    "pane_id", "pane_index", "pane_current_command", "pane_current_path",
+    "pane_dead", "@dotfiles_agent", "@dotfiles_agent_cwd", "@dotfiles_pane_name",
+    "@dotfiles_task_archived",
+)
+SEPARATOR = "\t"
+FORMAT = SEPARATOR.join("#{" + field + "}" for field in FIELDS)
+
+
+def inventory(run):
+    panes = []
+    for line in run("list-panes", "-a", "-F", FORMAT).split("\n"):
+        if not line:
+            continue
+        values = line.split(SEPARATOR)
+        if len(values) != len(FIELDS):
+            raise ValueError("A pane name or path contains unsupported control characters.")
+        pane = dict(zip(FIELDS, values))
+        if not (re.fullmatch(r"\$[0-9]+", pane["session_id"])
+                and re.fullmatch(r"@[0-9]+", pane["window_id"])
+                and re.fullmatch(r"%[0-9]+", pane["pane_id"])):
+            raise ValueError("Could not identify a tmux pane safely.")
+        pane["target"] = (pane["session_id"] + ":" + pane["window_id"]
+                          + "." + pane["pane_id"])
+        panes.append(pane)
+    return panes
+
+
+def safe_label(value):
+    # Paths/titles may be untrusted; don't pass terminal escape sequences to fzf.
+    return "".join(character if character.isprintable() else "?" for character in value)
+
+
+def row_label(pane, current):
+    name = pane["@dotfiles_pane_name"] or ("pane " + pane["pane_index"])
+    tool = pane["@dotfiles_agent"] or pane["pane_current_command"] or "shell"
+    status = "exited" if pane["pane_dead"] == "1" else "live"
+    if pane["@dotfiles_task_archived"] == "1":
+        status += ", hidden"
+    directory = pane["pane_current_path"] or pane["@dotfiles_agent_cwd"]
+    home = str(Path.home())
+    if directory == home:
+        directory = "~"
+    elif directory.startswith(home + "/"):
+        directory = "~" + directory[len(home):]
+    breadcrumb = (pane["session_name"] + " / " + pane["window_index"] + ":"
+                  + pane["window_name"] + " / " + name)
+    marker = "* " if pane["target"] == current else "  "
+    return marker + safe_label(breadcrumb) + "  |  " + safe_label(tool) + " · " + status + "  |  " + safe_label(directory)
+
+
+def client_context(run, client):
+    # display-message -c selects where messages go; its pane context may differ.
+    # list-clients formats each attached client's own session/window/pane.
+    for line in run("list-clients", "-F",
+                    "#{client_name}\t#{client_pid}\t#{session_id}:#{window_id}.#{pane_id}").splitlines():
+        name, pid, target = line.split("\t")
+        if name == client:
+            return target, pid
+    raise ValueError("The invoking tmux client is no longer attached.")
+
+
+def current_target(run, client):
+    return client_context(run, client)[0]
+
+
+def previous_option(run, client):
+    # Server options disappear at server exit. A reconnect gets its own history.
+    pid = client_context(run, client)[1]
+    digest = hashlib.sha256((client + "\0" + pid).encode()).hexdigest()[:16]
+    return "@dotfiles_task_previous_" + digest
+
+
+def find_target(run, target):
+    for pane in inventory(run):
+        if pane["target"] == target:
+            return pane
+    raise ValueError("That pane closed or moved. Press Ctrl+L to refresh.")
+
+
+def jump(run, client, pane, popup=False):
+    source = current_target(run, client)
+    destination = pane["target"]
+    if source == destination:
+        return
+    # Close our picker before switching, so its saved context cannot interfere.
+    switch = ["switch-client", "-Z", "-c", client, "-t", destination]
+    remember = ["set-option", "-s", previous_option(run, client), source]
+    if popup:
+        close = shlex.join(["display-popup", "-C", "-c", client])
+        commands = close + " ; " + shlex.join(switch) + " ; " + shlex.join(remember)
+        run("run-shell", "-b", "-C", tmux_folder(commands))
+    else:
+        run(*(switch + [";"] + remember))
+
+
+def previous(run, client, popup=False):
+    saved = run("show-options", "-sqv", previous_option(run, client))
+    if not saved:
+        raise ValueError("No previous task yet; jump to a pane with Ctrl+A, g first.")
+    jump(run, client, find_target(run, saved), popup=popup)
+
+
+def working_folder(pane):
+    directory = pane["pane_current_path"] or pane["@dotfiles_agent_cwd"]
+    if not Path(directory).is_absolute() or not Path(directory).is_dir():
+        raise ValueError("The selected pane's working folder is no longer available.")
+    return directory
+
+
+def tmux_folder(directory):
+    # -c/-d are tmux formats. Preserve literal # characters in folder names.
+    return directory.replace("#", "##")
+
+
+def shell(run, client, pane):
+    directory = working_folder(pane)
+    # Use the configured default shell/command. No agent is launched or restarted.
+    target = run("split-window", "-d", "-h", "-Z", "-t", pane["target"],
+                 "-c", tmux_folder(directory), "-P", "-F", "#{session_id}:#{window_id}.#{pane_id}")
+    run("set-option", "-p", "-t", target, "@dotfiles_pane_name", "shell")
+    run("set-option", "-w", "-t", target, "pane-border-status", "top")
+    jump(run, client, {"target": target}, popup=True)
+
+
+def rename(run, pane):
+    print("\nPane label [" + safe_label(pane["@dotfiles_pane_name"]) + "]")
+    print("Enter a new label; blank or Ctrl+C cancels.")
+    try:
+        name = input("Name: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return
+    if not name:
+        return
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _./:-]{0,63}", name):
+        raise ValueError("Use 1-64 letters, numbers, spaces, or . / : _ - for the pane name.")
+    find_target(run, pane["target"])
+    run("set-option", "-p", "-t", pane["target"], "@dotfiles_pane_name", name)
+    run("set-option", "-w", "-t", pane["target"], "pane-border-status", "top")
+
+
+def pick(panes, current, query="", include_hidden=False, message=""):
+    executable = shutil.which("fzf")
+    if not executable:
+        raise ValueError("Install fzf separately through the dotfiles agent bootstrap.")
+    visible = [pane for pane in panes
+               if include_hidden or pane["@dotfiles_task_archived"] != "1"]
+    choices = {str(index): pane for index, pane in enumerate(visible)}
+    rows = [index + "\t" + row_label(pane, current) for index, pane in choices.items()]
+    hidden = sum(pane["@dotfiles_task_archived"] == "1" for pane in panes)
+    actions = KEYS["TASK_ACTIONS"]
+    items = list(actions.items())
+    header = "\n".join(KEYS["action_hint"](dict(items[index:index + 3]))
+                       for index in range(0, len(items), 3))
+    header += "\nCtrl+j/k move  Esc cancel  |  " + str(hidden) + " hidden"
+    if include_hidden:
+        header += " (shown)"
+    if message:
+        header += "\n" + safe_label(message)
+    env = os.environ.copy()
+    for key in ("FZF_DEFAULT_COMMAND", "FZF_DEFAULT_OPTS", "FZF_DEFAULT_OPTS_FILE"):
+        env.pop(key, None)
+    result = subprocess.run(
+        [executable, "--read0", "--print0", "--print-query", "--no-multi",
+         "--delimiter=\t", "--with-nth=2..", "--layout=reverse",
+         "--border=none", "--info=inline", "--prompt=Tasks > ", "--header=" + header,
+         "--query=" + query, "--tiebreak=index",
+         # Wait for asynchronous matching before acting on fast typing/pastes.
+         "--bind=" + KEYS["fzf_bindings"](actions),
+         "--color=bg:#1a1b26,fg:#c0caf5,hl:#7aa2f7,bg+:#283457,fg+:#c0caf5,hl+:#7aa2f7,pointer:#7aa2f7,prompt:#7aa2f7,header:#565f89"],
+        input=b"\0".join(os.fsencode(row) for row in rows) + (b"\0" if rows else b""),
+        stdout=subprocess.PIPE, env=env,
+    )
+    if result.returncode == 130:
+        return None
+    if result.returncode not in (0, 1):
+        raise ValueError("The task picker exited with status " + str(result.returncode) + ".")
+    fields = result.stdout.split(b"\0")
+    if len(fields) < 3:
+        return None
+    query, action, selected = (os.fsdecode(field) for field in fields[:3])
+    return query, action, choices.get(selected.partition("\t")[0])
+
+
+def switcher(run, client):
+    query, include_hidden, message = "", False, ""
+    while True:
+        panes = inventory(run)
+        current = current_target(run, client)
+        panes.sort(key=lambda pane: (pane["session_id"] != current.partition(":")[0],
+                                    pane["session_name"].casefold(),
+                                    int(pane["window_index"]), int(pane["pane_index"])))
+        result = pick(panes, current, query, include_hidden, message)
+        if result is None:
+            return
+        query, action, pane = result
+        message = ""
+        if action == "hidden":
+            include_hidden = not include_hidden
+            continue
+        if action == "refresh":
+            continue
+        try:
+            if action == "previous":
+                previous(run, client, popup=True)
+                return
+            if pane is None:
+                message = "No matching pane. Change the search or show hidden panes."
+                continue
+            # Refresh IDs and cwd before acting on a possibly stale snapshot.
+            pane = find_target(run, pane["target"])
+            if action == "rename":
+                rename(run, pane)
+            elif action == "hide":
+                hidden = pane["@dotfiles_task_archived"] != "1"
+                run("set-option", "-p", "-t", pane["target"], "@dotfiles_task_archived", "1" if hidden else "0")
+                message = "Pane hidden; its process keeps running." if hidden else "Pane visible again."
+            elif action == "shell":
+                shell(run, client, pane)
+                return
+            elif action == "review":
+                # The outer popup must close before tmux can open another popup.
+                # Open it through a separate native tmux command queue.
+                directory = working_folder(pane)
+                executable = shutil.which("tuicr")
+                if not executable:
+                    raise ValueError("Install tuicr to review local changes.")
+                return "review", pane["target"]
+            else:
+                jump(run, client, pane, popup=True)
+                return
+        except ValueError as error:
+            message = str(error)
+
+
+def open_popup(run, client, socket):
+    command = shlex.join([sys.executable, str(Path(__file__))])
+    close = shlex.join(["display-popup", "-C", "-c", client])
+    popup = shlex.join(["display-popup", "-EE", "-c", client, "-w", "90%", "-h", "80%",
+                       "-T", "Tasks", "-e", "DOTFILES_TMUX_CLIENT=" + client,
+                       "-e", "DOTFILES_TMUX_SOCKET=" + socket, command])
+    run("run-shell", "-b", "-C", tmux_folder(close + " ; " + popup))
+
+
+def main():
+    client = os.environ.get("DOTFILES_TMUX_CLIENT")
+    socket = os.environ.get("DOTFILES_TMUX_SOCKET")
+    tmux = shutil.which("tmux")
+    if not client or not socket or not tmux:
+        raise ValueError("Open the task switcher with Ctrl+A, g inside tmux.")
+
+    def run(*args):
+        result = subprocess.run([tmux, "-S", socket] + list(args),
+                                capture_output=True, text=True, timeout=5)
+        if result.returncode:
+            raise ValueError(result.stderr.strip() or "tmux command failed")
+        return result.stdout.rstrip("\n")
+
+    if client not in run("list-clients", "-F", "#{client_name}").splitlines():
+        raise ValueError("The invoking tmux client is no longer attached.")
+    if sys.argv[1:] == ["--previous"]:
+        try:
+            previous(run, client)
+        except ValueError as error:
+            run("display-message", "-c", client, "Tasks: " + str(error))
+        return
+    if sys.argv[1:]:
+        raise ValueError("Usage: tmux-tasks [--previous]")
+    result = switcher(run, client)
+    if result is not None:
+        _, target = result
+        # A separate native queue survives closing this popup.
+        close = shlex.join(["display-popup", "-C", "-c", client])
+        review = Path(__file__).with_name("tmux-review")
+        popup = shlex.join(["display-popup", "-EE", "-c", client, "-w", "95%", "-h", "90%",
+                           "-T", "Local review", "-e", "DOTFILES_TMUX_CLIENT=" + client,
+                           "-e", "DOTFILES_TMUX_SOCKET=" + socket,
+                           "-e", "DOTFILES_TMUX_PANE=" + target,
+                           shlex.join([sys.executable, str(review)])])
+        run("run-shell", "-b", "-C", tmux_folder(close + " ; " + popup))
+
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print("Task switcher: " + str(error), file=sys.stderr)
+        sys.exit(1)

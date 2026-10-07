@@ -29,9 +29,9 @@ Review locally before opening a PR or starting an internal code review; no remot
 review object is required. Keep comments/progress private, return feedback to the
 selected agent, and review its fixes. Publishing remains a separate user action.
 Review queue, on-demand Git UI, focused agent reviews, and task worktree helpers
-are proposed additions. Tuicr is the starting tool for local comment-based reviews;
-agent attention shortcuts and feedback handoff are not implemented yet. Verify
-saved comments, revision changes, and SSH clipboard before applying it to this machine.
+are proposed additions. Tuicr supplies local comment-based reviews and private, task-specific feedback.
+Automatic attention events and worktree helpers remain open. Verify changed revisions
+and saved comments; actual SSH clipboard still needs a client check.
 
 ## Devices
 
@@ -88,6 +88,15 @@ in BOOTSTRAP.md and machine-specific records outside Git.
 - Verification results belong to the files that were tested. State whether checks
   used the current worktree or a saved baseline, and verify relevant later changes
   before reporting them as passing.
+- Use `list-clients` for an invoking client's pane/PID. `display-message -c`
+  still resolves pane context separately and can mix another session into the result.
+- Fzf matching is asynchronous. Selection-dependent actions must wait for the
+  latest match before accepting; fast typing/pastes can otherwise act on an older row.
+- Keep shortcuts in `home/dot_local/bin/tmux_keys.py`; regenerate with
+  `python3 scripts/sync-tmux-keys.py`. Its `--check` mode and CI reject stale bindings/help.
+  Apply the catalog, affected helpers, configuration, and cheatsheet together.
+- Terminal control sequences can split words in captured PTY output. Normalize
+  them before readiness checks, or timings can measure a later redraw instead.
 - Match verification to the behavior we own. Use short isolated checks for simple
   configurations; retain regression scripts for custom helpers with meaningful
   failure modes. Avoid maintaining tests of upstream tools and plugins.
@@ -96,8 +105,8 @@ in BOOTSTRAP.md and machine-specific records outside Git.
 
 Implemented: this guide and agent bootstrap instructions, the Claude import,
 a read-only inventory, minimal tuicr configuration, the shared tmux baseline,
-scratch tasks, and an agent launcher
-with an optional folder picker, and a minimal zsh setup.
+scratch tasks, an agent launcher with a folder picker, an on-demand task/agent
+switcher, and a minimal zsh setup.
 .chezmoiroot selects home/ as the source.
 Run the inventory from the repo root with Python 3.8+:
 
@@ -164,17 +173,30 @@ The pilot keeps its pre-existing resurrect/continuum plugins in ~/.tmux.local.co
 an unmanaged private override loaded beside ~/.tmux.conf. Its compatibility plugin
 list supports the existing TPM version. Keep continuum loaded after status styling.
 
+SSH clients: Ghostty on macOS and RootShell on iPad. Use native OSC 52; the pilot's
+attached xterm-256color clients advertise `Ms` and `set-clipboard` is already on.
+Private PTY checks passed for copy-mode v/y emitting OSC 52, UTF-8/multiline input,
+and explicit client routing; no real clipboard contents were read. Local device paste
+confirmation is pending. No new dependency, watcher, or tmux restart is needed.
+
 | After Ctrl+A | Action |
 | --- | --- |
 | Ctrl+A | Send Ctrl+A to the application |
+| ? | Shortcut cheatsheet; j/k scroll, / searches, q closes |
 | c / \| / - | New window / horizontal split / vertical split |
 | h/j/k/l / H/J/K/L | Move / resize panes |
 | z / Tab | Zoom / previous window |
 | s / w | Session / window picker |
 | N (Shift+N) / b | Workspace launcher / return to the previous session |
+| g / B (Shift+B) | Search existing tasks/panes / return to the previous task |
 | r | Local tuicr review popup; reports a missing tool |
 | R | Reload installed tmux configuration |
 | [ | Copy mode; v selects, y copies |
+
+Ctrl+A, ? opens the managed ~/.config/tmux/cheatsheet.txt in less, on demand.
+Apply that file with the tmux configuration; no help/history files are written at runtime.
+Verified on an isolated server at 120x40 and 70x24: scrolling/search/close,
+~26 ms first paint, chezmoi dry-run/reruns/restoration, and live-pane preservation.
 
 Ctrl+A, Shift+N opens one Workspace menu. j/k chooses Scratch task (a private
 folder and named window), New agent pane (another agent in the current window/folder),
@@ -182,7 +204,7 @@ or New session (a separate named session in the current folder). h/l switches
 Codex/Claude; Enter opens; Esc/q cancels. Names support Backspace,
 Ctrl+U to clear, Esc to go back, and Ctrl+C to cancel. Existing session names are
 rejected without changing them; Ctrl+A, s switches sessions. New sessions reserve
-the name scratch for scratch tasks. Ctrl+A, g is unbound.
+the name scratch for scratch tasks. Inside the Workspace menu, g opens existing work.
 Inside the popup, p immediately opens a pane, P asks for a pane name, s asks for
 a new-session name, and t asks for a scratch-task name. These keys use the
 selected/remembered agent; h/l changes it. While editing a name, letters are text.
@@ -200,9 +222,9 @@ session. Reopening a live task preserves its window/conversation, regardless of
 the menu's agent choice. Closing its window keeps files; reopening starts a fresh
 conversation, not exact agent recovery.
 The helpers run only on demand and require Python 3.8+ with curses, tmux, and Git.
-The commands are `tmux-workspace`, `tmux-scratch`, and `tmux-agent`. The menu waits
-for key input without polling; the recovery helper replaces itself with the CLI.
-Apply the tmux configuration and all three helpers together.
+The commands are `tmux-workspace`, `tmux-scratch`, `tmux-agent`, `tmux-tasks`, and `tmux-review`.
+The menu waits for key input without polling; the recovery helper replaces itself with the CLI.
+Apply the tmux configuration, all five helpers, and `tmux_keys.py` together.
 Scratch roots inside Git checkouts are rejected. Override the root privately in
 ~/.tmux.local.conf with `set-environment -g DOTFILES_SCRATCH_ROOT '/absolute/path'`.
 Inside the popup, f picks a folder for a new session and suggests its basename as
@@ -220,7 +242,20 @@ recent session folders stored privately in XDG_STATE_HOME/dotfiles/recent-folder
 The default project list skips hidden/build/dependency folders and symlinks. Override roots
 privately with `set-environment -g DOTFILES_PROJECT_ROOTS '/absolute/root:/another'`.
 The workspace picker adds no directory previews; zoxide integrates with zsh separately.
-The task/resource picker, archival controls, and pane moves remain future work.
+Ctrl+A, g opens the task switcher: search session/window/pane labels, tools, and
+folders with fzf; Ctrl+j/k moves, Enter jumps, and Esc cancels. Alt+s opens a shell
+split in the selected pane's folder; Ctrl+R opens its local review. Alt+n changes
+its stable pane label. Alt+A hides/unhides a pane without stopping its process;
+Alt+H includes hidden panes, and Ctrl+L refreshes the snapshot. Alt+b in the picker
+or Ctrl+A, Shift+B returns to the exact previous pane reached through this switcher.
+Linked windows retain the selected session context, and zoom is preserved.
+Discovery reads only native tmux metadata, on demand. Unmarked panes show their
+current command; live/exited labels do not infer whether an agent is busy or waiting.
+Labels/hiding/history stay in private tmux options; hiding and previous-task history
+reset when the server exits. Managed labels enter the next agent recovery snapshot.
+Reviews open in the selected folder; multiple tasks sharing one checkout still
+review the same changes until worktrees are added. Task worktrees, resource
+associations, automatic attention events, and pane moves remain open.
 
 Exact recovery is implemented for registered panes: lifecycle hooks record a UUID,
 and layout saves freeze it with the folder, tool, and pane label in private snapshots.
@@ -241,11 +276,26 @@ These include the helper and installed plugin, exclude real agent/model work, an
 are initial Ubuntu checks. The helper execs the CLI, leaving no Python supervisor per pane.
 
 The pilot has checksum-verified fzf 0.74.4 installed; other platforms remain unverified.
+Task-switcher checks use a private server and real fzf with synthetic commands;
+they cover pane/session identity, zoom, linked windows, previous-task navigation,
+shell/review folders, labels, reversible hiding, cancellation, missing dependencies,
+literal paths, rapid query/action dispatch, and existing-process preservation.
+Actual terminal testing is pending. On Ubuntu/tmux 3.4, repeated checks with two
+attached clients passed: popup readiness ~73 ms, seven-row inventory ~3 ms, and a
+one-second idle sample measured 0% across the server, picker, and helper processes.
+Scoped chezmoi preview/dry-run/reruns/restoration passed. The pilot's new bindings
+and helpers are applied with a private backup; all nine panes were preserved.
+Only changed bindings were reloaded, retaining the existing continuum status hook.
+The pilot's legacy plugin can skip adding that hook on a full reload when its
+multiple-server guard fires; verify it after future full reloads.
 
 Run the isolated tmux checks with Python 3.8+, tmux, Git, and fzf:
 
 ```sh
 python3 scripts/verify-tmux.py
+python3 scripts/verify-tasks.py
+python3 scripts/verify-reviews.py
+python3 scripts/sync-tmux-keys.py --check
 ```
 
 Verified on Ubuntu/tmux 3.4: configuration reload, key dispatch, directory handling,
@@ -271,21 +321,37 @@ These are initial sanity checks, not a multi-agent performance baseline.
 Isolated chezmoi preview/dry-run/repeated apply, executable mode, backup/restoration,
 and preservation of private overrides also passed for the tmux files and helpers.
 
-The tuicr config selects Tokyo Night, side-by-side diffs, and Neovim for file
-navigation. It disables startup update checks and background diff/review polling.
-Tuicr's local comments/progress stay in its data directory outside Git.
-Tuicr remains a temporary trial binary. The pilot's
-tmux config is applied through chezmoi, backed up under ~/.local/state/dotfiles/backups/,
-and reloaded without replacing live panes. All three tmux helpers are applied under
-~/.local/bin/. The tuicr config is not applied yet.
-After tool installation, `tuicr -w` opens local changes; `c` adds a comment and
-`ZZ` exports and exits. `:q` exits without exporting; `--stdout` redirects exports
-to stdout for a future feedback handoff.
+The local review helper opens `tuicr -w --stdout --no-update-check` for the selected
+checkout; `c`/`C` comments on a line/file and `v` then `c` selects a range.
+Enter saves a comment; `ZZ` exports into private state and opens feedback actions:
+`p` prepares a one-line prompt in the exact agent pane without Enter, `v` views
+feedback, `r` reviews again, and `q` closes. `:q` leaves without exporting.
+Preparation requires a captured conversation UUID, unchanged pane/process/record,
+an active agent outside copy mode, and the same Git revision. Existing unmanaged
+panes need explicit UUID binding; never infer their conversation from history.
+Shared-checkout agents still see the same Git changes, but their comments/exports
+are separate. Changed revisions get fresh comments; prior feedback stays archived.
 
-Verified on Ubuntu with a checksum-checked temporary tuicr 0.27.0 binary: chezmoi
-preview/dry-run/repeated apply, file/line/range comments, untracked files, saved
-comments across reopen, Markdown export, and refreshed diffs on reopen. Real SSH
-clipboard, moved-line comment anchors, and real-terminal performance remain unverified.
+Comments and immutable exports live under `$XDG_STATE_HOME/dotfiles/reviews/`
+(default ~/.local/state/dotfiles/reviews), outside Git, with owned private directories
+and 0600 exports/metadata. Tuicr data is isolated by task/conversation/revision;
+its editor wrapper restores Neovim's ordinary HOME/XDG paths. The config uses
+Tokyo Night, side-by-side diffs, and disables update checks and diff/review watchers.
+No agent submission, remote review object, background watcher, or clipboard is needed.
+Revision hashing runs on demand; untracked content is capped at 64 MiB per check.
+
+Verified with official checksum-checked stable tuicr 0.27.0 on Ubuntu: real
+file/line/range comments, clean export, per-agent isolation, unchanged-revision reopen,
+fresh comments after moved lines, stale-ID/revision refusal, Git ignore settings,
+editor environment, and bracketed preparation without Enter at 120x40/70x24 with
+fake agents. Pilot installation/configuration/helpers/help are applied with private
+backups; all nine panes, attached clients, the override, and continuum hook were retained.
+Scoped chezmoi dry-run/reruns/restoration passed. Rendered review readiness ~105–135 ms,
+revision hashing ~6 ms on a small fixture, sampled one-second idle CPU 0%.
+These exclude real agent/model work and are not large-project performance budgets.
+Real SSH clipboard, physical terminal behavior, and real-agent input remain unverified.
+The private wrapper requires Linux XDG storage; macOS isolation needs implementation
+and verification before rollout (plain `tuicr -w` remains usable there).
 
 For inventory changes, check syntax and both output modes. Test helper changes
 and chezmoi previews/repeated runs with isolated home/config/state directories,
@@ -299,8 +365,6 @@ tmux 3.4, Neovim 0.9.5, Git 2.43.0, ripgrep 15.2.0 (from Codex), fdfind 9.0.0,
 mise 2026.8.10, Codex 0.160.0, Claude Code 2.1.246. Zsh, fzf, and fd command missing.
 Node/Python use mise; respect existing ownership before adding a runtime manager.
 
-The Bash loader still references deleted shell/ipad.sh; address it during migration
-with backups. The legacy tmux/scrolling.conf loader was replaced with a backup.
 No user Neovim or chezmoi configuration
 directory was observed. Startup timing and clipboard/session behavior are unverified.
 These are observed versions, not installation targets; tmux is now applied as above.
@@ -312,10 +376,11 @@ These are observed versions, not installation targets; tmux is now applied as ab
 2. **In progress:** tmux controls/UI/review shortcut are verified; the baseline is
    applied and reloaded on the pilot with existing layout persistence preserved.
    Scratch organization, one Vim-style launcher with remembered agent selection,
-   named-pane captions, and the folder picker are implemented.
+   named-pane captions, the folder picker, and task/agent navigation are implemented.
    Exact-ID recovery is implemented and tested on an isolated server; native hook
    capture passed offline checks. **Next:** real conversation recovery verification,
-   then task/agent navigation and feedback handoff.
+   then reliable attention events and task worktrees. Local review/feedback and generated
+   shortcut help are implemented; actual user-terminal checks remain.
    Use the home/ chezmoi source and add stable tool setup needed for this milestone.
    Measure overhead; test recovery on an isolated server before applying changes.
    Verify previews, preservation/restoration, and reruns.
@@ -344,5 +409,7 @@ and benchmarks are planned. Bootstrap on additional platforms remains unverified
   [Git worktrees](https://git-scm.com/docs/git-worktree).
 - [Codex instructions](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
   and [Claude imports](https://code.claude.com/docs/en/memory).
+- [fzf picker actions](https://github.com/junegunn/fzf/blob/master/man/man1/fzf.1)
+  and [tmux client formats](https://github.com/tmux/tmux/blob/master/cmd-list-clients.c).
 - [Tuicr](https://github.com/agavra/tuicr) and
   [configuration](https://github.com/agavra/tuicr/blob/main/docs/CONFIG.md).

@@ -32,6 +32,7 @@ def main():
     if not tmux:
         raise SystemExit("tmux is required")
     config = Path(__file__).resolve().parents[1] / "home/dot_tmux.conf"
+    subprocess.run([sys.executable, str(config.parent.parent / "scripts/sync-tmux-keys.py"), "--check"], check=True)
     client = None
     master = None
     terminal_output = bytearray()
@@ -54,6 +55,11 @@ def main():
         recovery_helper = fixture_home / ".local/bin/tmux-agent"
         shutil.copyfile(config.parent / "dot_local/bin/executable_tmux-agent", recovery_helper)
         recovery_helper.chmod(0o700)
+        for name in ("tmux-tasks", "tmux-review"):
+            shutil.copyfile(config.parent / ("dot_local/bin/executable_" + name), helper.parent / name)
+            (helper.parent / name).chmod(0o700)
+        shutil.copyfile(config.parent / "dot_local/bin/tmux_keys.py", helper.parent / "tmux_keys.py")
+        subprocess.run(["git", "init", "-q", str(checkout)], check=True, env=dict(os.environ, HOME=str(fixture_home)))
         for name, executable in (("python3", sys.executable), ("tmux", tmux), ("fzf", fzf),
                                  ("git", shutil.which("git"))):
             if not executable:
@@ -172,8 +178,10 @@ def main():
             assert run("show-options", "-gv", "status-position") == "bottom"
             assert run("display-message", "-p", "#{window_index}:#{pane_index}") == "1:1"
             bindings = run("list-keys", "-T", "prefix")
-            assert not re.search(r"\bprefix\s+(g|C-x|C-u)\s", bindings)
+            assert not re.search(r"\bprefix\s+(C-x|C-u)\s", bindings)
             assert "--menu" in run("list-keys", "-T", "prefix", "N")
+            assert "tmux-tasks" in run("list-keys", "-T", "prefix", "g")
+            assert "--previous" in run("list-keys", "-T", "prefix", "B")
             assert "send-prefix" in run("list-keys", "-T", "prefix", "C-a")
             for option in ("status-left", "status-right", "pane-border-format"):
                 assert "#(" not in run("show-options", "-gv", option)
@@ -211,7 +219,9 @@ def main():
             assert run("display-message", "-p", "#{window_index}") == "1"
 
             press(b"\x01r")
-            wait_for(lambda: "Install tuicr" in run("show-messages", "-t", client_name))
+            wait_for(lambda: b"Install tuicr" in terminal_output)
+            press(b"\x1b")
+            drain(0.2)
             stub = tools / "tuicr"
             stub.write_text(
                 "#!" + sys.executable + "\n"
@@ -223,7 +233,7 @@ def main():
             press(b"\x01r")
             wait_for(result_file.exists)
             assert json.loads(result_file.read_text()) == {
-                "cwd": str(checkout), "args": ["-w"]
+                "cwd": str(checkout), "args": ["-w", "--stdout", "--no-update-check"]
             }
 
             run("new-window", "-n", "copy", "-c", str(checkout),
@@ -557,7 +567,7 @@ def main():
             press(b"\x01N")
             picker_started = time.perf_counter()
             os.write(master, b"f")
-            wait_for(lambda: b"Enter choose / Esc back" in terminal_output)
+            wait_for(lambda: b"Enter choose" in terminal_output)
             folder_picker_ready_ms = (time.perf_counter() - picker_started) * 1000
             press(b"\x1b")
             wait_for(lambda: b"Open workspace" in terminal_output)
@@ -573,7 +583,7 @@ def main():
                 terminal_output.clear()
                 press(b"\x01N")
                 press(shortcut)
-                wait_for(lambda: b"Enter choose / Esc back" in terminal_output)
+                wait_for(lambda: b"Enter choose" in terminal_output)
 
             def choose_folder(query, name):
                 press(query.encode())
