@@ -22,6 +22,7 @@ not targets.
 | Workspace/scratch helpers | Python 3.8+ with curses, tmux, Git | Launcher UI and scratch-folder safety; apply the tmux configuration and all six helpers plus `tmux_keys.py` together |
 | Agent launching/recovery | Selected Codex and/or Claude Code CLI with SessionStart hooks; tmux-resurrect for layouts | Available in tmux's PATH; exact IDs and credentials stay private |
 | Agent attention | Native Codex/Claude hooks, Python, tmux; fzf for the queue | Shared event reducer and cached native status; no daemon or transcript inspection |
+| Agent status lines | Native Codex footer; POSIX sh, jq, Git for Claude; Python 3.11+ during setup only | Model/effort/context/branch; explicit personal mode adds subscription headroom |
 | Fuzzy selection | fzf | Shell history/file/directory selection, zoxide's `zi`, tmux folder/task pickers, and the full tmux verification suite |
 | Local reviews | tuicr, Neovim (`nvim`), Git, less | Private local comments/export and guarded feedback preparation; the editor wrapper keeps normal Neovim paths |
 | Interactive shell | Current stable Zsh, zsh-autosuggestions, zsh-syntax-highlighting; fzf integration; fd/fdfind when available | Native Vim editing/completion/history, suggestions/highlighting, on-demand fuzzy navigation |
@@ -180,6 +181,53 @@ private server restart, real plugin restore, duplicate/missing-state failures,
 manual adoption, private settings merging/backups, and repeatability. Use
 `python3 scripts/verify-tmux.py` for launcher/picker checks. No real conversations
 or reboot are exercised by these scripts; verify an actual recovery deliberately.
+
+## Agent status-line setup
+
+Apply only the `claude-statusline` renderer after a scoped preview:
+
+```sh
+chezmoi --source="$PWD" --no-pager diff ~/.local/bin/claude-statusline
+chezmoi --source="$PWD" apply --dry-run --parent-dirs ~/.local/bin/claude-statusline
+chezmoi --source="$PWD" apply --parent-dirs ~/.local/bin/claude-statusline
+python3 scripts/setup-agent-statusline.py --mode personal --dry-run
+python3 scripts/setup-agent-statusline.py --mode personal
+```
+
+Select `--mode work` explicitly on work devices; context is never inferred from OS,
+hostname, checkout or authentication. Work omits usage/cost; personal shows supplied
+subscription limits rather than reconstructing them from tokens or transcripts.
+The native Codex items are model-with-reasoning, context-remaining, git-branch and
+fast-mode; personal adds five-hour-limit and weekly-limit before branch.
+Compatible pilot versions are Codex 0.160.1 and Claude 2.1.246. Further versions
+need field/width checks; quotas depend on the account/provider and first response.
+
+The setup script validates all targets before writing, preserves unrelated settings
+and TOML comments, backs up changed files, then writes atomically per file. It
+honors CODEX_HOME, CLAUDE_CONFIG_DIR, XDG_CONFIG_HOME and XDG_STATE_HOME; all directory
+overrides must be absolute. Repeated runs leave identical files untouched. Ordinary
+`[tui]` tables and root dotted keys are supported; unusual inline/quoted table forms
+fail without changes rather than reserializing private configuration. `--renderer`
+selects a different installed executable. Claude gets a direct, quoted command with
+no refreshInterval; nothing is installed or updated by rendering or setup.
+
+Backups live under `$XDG_STATE_HOME/dotfiles/backups/agent-statusline-*/` in 0700
+directories with 0600 originals/manifests. Each manifest entry records `target`,
+`existed`, original `mode`, and its `backup` filename. To restore, copy an entry's
+saved bytes to its target and restore that mode; remove targets recorded as new.
+Review any intervening private changes before restoration. Back up a conflicting
+renderer separately before chezmoi application; restoration of that helper is
+separate from agent settings. Keep all backups and machine results outside Git.
+
+Run `python3 scripts/verify-statusline.py` for our rendering, private-mode selection,
+widths/colors, branch identity, missing/zero metrics, additive configuration,
+preview/reruns, malformed targets and restorable backups. Use disposable homes
+with isolated HOME/XDG/CODEX_HOME/CLAUDE_CONFIG_DIR for chezmoi preview/dry-run/
+repeated application and conflict restoration. Measure actual renderer cost and
+verify installed versions in an isolated terminal; never restart or type into live
+agent conversations for a check. No upstream plugin test harness is involved.
+Claude width comes from COLUMNS, without tput; Unicode is bounded conservatively by
+UTF-8 byte length. Physical terminals and other platforms need their own checks.
 
 ## Agent attention setup and event contract
 

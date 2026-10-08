@@ -6,7 +6,46 @@ first verified platform. [AGENTS.md](AGENTS.md) records scope and decisions;
 Package installation and configuration application are separate operations.
 
 The `home/` source currently manages tmux, its workspace/scratch/recovery/task helpers,
-zsh, Neovim, and local tuicr reviews. Other platforms still need testing.
+zsh, Neovim, local tuicr reviews, and Claude's status-line renderer. Other platforms
+still need testing.
+
+## Agent status lines
+
+Codex uses its native footer: model/reasoning, context remaining, branch and Fast
+mode. Personal mode also includes five-hour and weekly subscription headroom.
+`/statusline` selects/reorders native fields and has a Use theme colors toggle for
+the active `/theme`; setup preserves your theme. Config changes apply to new sessions.
+The footer remains separate from tmux's task names and attention indicators.
+
+Claude's small `claude-statusline` command reads the native session JSON. It shows
+model/effort, context remaining, optional Fast/Vim modes and branch; personal mode
+adds five-hour/weekly headroom and local reset times when supplied. Percentages
+are **remaining**, not consumed. Missing context is `?`; absent quotas stay hidden.
+Reset times use the process timezone (`TZ` or the host default). At narrower widths,
+branch is omitted when necessary and quotas use a second row; below 50 columns,
+reset times are omitted. Tokyo Night colors need no special font; `NO_COLOR=1`
+disables them. Colors warn at 20%/10% remaining capacity, not a model-quality cutoff.
+
+Rendering uses POSIX sh, jq and a Git symbolic-HEAD lookup in the supplied folder,
+without scanning changed files. No transcript/credential reads, usage API requests,
+updates, installs, cache files or periodic refresh are configured. Setup needs
+Python 3.11+ for standard-library TOML validation; it runs only on demand.
+
+After applying the renderer, choose the machine context explicitly:
+
+```sh
+python3 scripts/setup-agent-statusline.py --mode personal --dry-run
+python3 scripts/setup-agent-statusline.py --mode personal
+# On a work machine, use --mode work for both commands.
+```
+
+Setup merges only Codex's `tui.status_line` and Claude's `statusLine`, preserving
+attention/recovery hooks and other settings. The machine choice lives privately in
+`$XDG_CONFIG_HOME/dotfiles/agent-statusline-mode` (default ~/.config/dotfiles/).
+Agent configs remain unmanaged private files; never add whole configs to Git.
+Claude reloads its setting automatically; existing Codex conversations keep running
+and adopt the footer on their next launch. See [BOOTSTRAP.md](BOOTSTRAP.md#agent-status-line-setup)
+for scoped application, backup/restoration and verification.
 
 ## Zsh
 

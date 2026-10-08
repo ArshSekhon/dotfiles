@@ -127,6 +127,25 @@ markers, configuration presence, and legacy loader references. It prints no conf
 contents or connection addresses and does not source startup files or change setup.
 Do not commit its output: executable paths are machine-specific.
 
+Agent footers use native Codex fields and a small Claude JSON renderer. Explicit
+work/personal mode is private; work shows model/effort/context/branch, while personal
+adds available subscription headroom. Setup merges only footer settings and keeps
+attention/recovery hooks. Renderer source is `home/dot_local/bin/executable_claude-statusline`;
+preview/merge with `python3 scripts/setup-agent-statusline.py --mode personal --dry-run`
+(use --mode work on work devices), then rerun without --dry-run. Setup needs Python
+3.11+; rendering uses sh/jq/Git, without transcript/credential reads, dirty scans, network or idle
+polling. Run `python3 scripts/verify-statusline.py`; procedures and restoration are
+in BOOTSTRAP.md. Rendering uses native percentages; missing values stay unknown.
+Ubuntu footer pilot, 2026-10-07: personal mode is applied with private backups.
+Current-source checks passed for rendering, colors/widths/checkout identity, additive
+merges, previews/reruns/restoration and scoped chezmoi application. Codex 0.160.1's
+native picker recognized all six fields; Claude 2.1.246 supplied native JSON and
+rendered initial unknown context in disposable offline PTYs. Installed synthetic
+rendering with Git took ~8.5–8.6 ms warm medians/~8.7–9.0 ms first invocations at
+120/70 columns. No idle refresh is configured. Non-footer settings/hooks, all nine
+pane IDs/PIDs and both clients were preserved. Real subscription payloads, physical
+terminals and other platforms remain unverified; detailed results stay private.
+
 Preview managed configuration from the repo root:
 
 ```sh

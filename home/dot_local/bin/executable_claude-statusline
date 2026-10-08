@@ -1,0 +1,84 @@
+#!/bin/sh
+# Claude supplies one JSON object on stdin. No startup files, installs, network,
+# transcript reads, usage API calls, persistent cache, or idle timer are needed.
+# Configure both agents with scripts/setup-agent-statusline.py --mode work|personal.
+mode=work
+mode_file="${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles/agent-statusline-mode"
+if [ -r "$mode_file" ]; then
+    IFS= read -r mode < "$mode_file" || :
+fi
+case "$mode" in work|personal) ;; *) mode=work ;; esac
+command -v jq >/dev/null 2>&1 || exit 0
+
+# Compact the input and extract its actual folder in one parse. Reject control
+# characters in paths instead of accidentally querying a different checkout.
+prepared=$(jq -r '
+    if type != "object" then error("Expected a session object") else . end |
+    (.workspace.current_dir // .cwd // "") as $dir |
+    (if ($dir | type) == "string" and ($dir | startswith("/")) and
+        ($dir | test("[\\x00-\\x1f\\x7f]") | not) then $dir else "" end),
+    tojson
+' 2>/dev/null) || exit 0
+newline='
+'
+directory=${prepared%%"$newline"*}
+payload=${prepared#*"$newline"}
+
+# Read only HEAD's symbolic name, never tracked/untracked changes. Native Claude
+# worktree metadata takes precedence in the renderer. Detached HEAD has no branch.
+branch=
+if [ -n "$directory" ] && command -v git >/dev/null 2>&1; then
+    branch=$(git -C "$directory" symbolic-ref --quiet --short HEAD 2>/dev/null) || branch=
+fi
+
+printf '%s\n' "$payload" | jq -r --arg mode "$mode" --arg branch "$branch" \
+    --arg columns "${COLUMNS:-80}" --arg no_color "${NO_COLOR-}" '
+    # Tokyo Night foregrounds, plain separators, and optional NO_COLOR support.
+    def clean: if type == "string" then gsub("[\\x00-\\x1f\\x7f-\\x9f]"; "") else "" end;
+    def prefix($n): if utf8bytelength <= $n then . else .[:-1] | prefix($n) end;
+    def clip($n): if $n <= 0 then "" elif utf8bytelength <= $n then .
+                 else prefix($n - 1) + "~" end;
+    def paint($rgb): if $no_color != "" then . else
+        "\u001b[38;2;" + $rgb + "m" + . + "\u001b[0m" end;
+    def pct: if type == "number" then [0, ([., 100] | min)] | max | round else null end;
+    def color($left): if $left == null then "86;95;137" elif $left <= 10 then "247;118;142"
+                     elif $left <= 20 then "224;175;104" else "125;207;255" end;
+    def reset_time($stamp; $weekly):
+        if ($stamp | type) == "number" then
+            try (" @" + ($stamp | localtime | strftime(if $weekly then "%a %H:%M" else "%H:%M" end))) catch ""
+        else "" end;
+    # Byte lengths conservatively bound Unicode width without a font dependency.
+    (($columns | tonumber? // 80) | floor | if . < 24 then 24 elif . > 500 then 500 else . end) as $width |
+    ((.context_window.remaining_percentage | pct) //
+      (.context_window.used_percentage | if type == "number" then 100 - . | pct else null end)) as $ctx |
+    (if $ctx == null then "ctx ?" else "ctx \($ctx)% left" end) as $context |
+    ([((.effort.level // "") | clean), (if .fast_mode == true then "fast" else "" end),
+      ((.vim.mode // "") | clean)] | map(select(. != "")) | join(" ")) as $modes |
+    ((.model.display_name // .model.id // "Claude") | clean | .[:80]) as $model |
+    (($model + (if $modes != "" then " " + $modes else "" end)) |
+      clip([$width - ($context | utf8bytelength) - 3, 40] | min)) as $label |
+    ($label + " | " + $context) as $core_plain |
+    (($label | paint("122;162;247")) + " | " + ($context | paint(color($ctx)))) as $core |
+    ((.worktree.branch // $branch) | clean | .[:100] | clip(24)) as $git |
+    (if $git != "" and ($core_plain | utf8bytelength) + ($git | utf8bytelength) + 3 <= $width then
+        {plain: ($core_plain + " | " + $git), ansi: ($core + " | " + ($git | paint("187;154;247")))}
+     else {plain: $core_plain, ansi: $core} end) as $main |
+    # Subscription quota is account usage, separate from this session context.
+    (if $mode == "personal" then
+      [{key: "5h", window: .rate_limits.five_hour, weekly: false},
+       {key: "wk", window: .rate_limits.seven_day, weekly: true}] |
+      map(select((.window.used_percentage | type) == "number") |
+          (100 - .window.used_percentage | pct) as $left |
+          (.key + " \($left)%" + (if $width < 32 then "" else " left" end) +
+           (if $width >= 50 then reset_time(.window.resets_at; .weekly) else "" end)) as $text |
+          {plain: $text, ansi: ($text | paint(color($left)))})
+     else [] end) as $limits |
+    ((if $width < 32 and ($limits | length) > 0 then "left " else "" end) +
+      ($limits | map(.plain) | join(" | "))) as $limits_plain |
+    ((if $width < 32 and ($limits | length) > 0 then "left " else "" end) +
+      ($limits | map(.ansi) | join(" | "))) as $limits_ansi |
+    if $limits_plain == "" then $main.ansi
+    elif ($main.plain | utf8bytelength) + ($limits_plain | utf8bytelength) + 3 <= $width then
+        $main.ansi + " | " + $limits_ansi
+    else $main.ansi, $limits_ansi end
+' 2>/dev/null || exit 0
