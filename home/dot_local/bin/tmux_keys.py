@@ -18,8 +18,17 @@ PREFIX = (
     ('prefix', 'J', 'Resize down', 'bind -r J resize-pane -D 5'),
     ('prefix', 'K', 'Resize up', 'bind -r K resize-pane -U 5'),
     ('prefix', 'L', 'Resize right', 'bind -r L resize-pane -R 5'),
+    # Native run-shell -C freezes the invoking ID; even -s . can use a marked pane.
+    # No shell/process is launched. -d keeps focus on the source in this window.
+    # Reveal the layout first; edge guards prevent wrapping to the opposite side.
+    *tuple(('prefix', 'S-' + arrow, 'Swap pane ' + direction,
+            'bind -r S-' + arrow + ' if-shell -F "#{window_zoomed_flag}" "resize-pane -Z"'
+            + ' \\; run-shell -C \'if-shell -F "#{pane_at_' + edge + '}" "" '
+            + '"swap-pane -d -s #{pane_id} -t \\"{' + direction + '-of}\\""\'')
+           for arrow, direction, edge in (('Left', 'left', 'left'), ('Down', 'down', 'bottom'),
+                                           ('Up', 'up', 'top'), ('Right', 'right', 'right'))),
     ('prefix', 'Tab', 'Previous window', 'bind Tab last-window'),
-    ('prefix', 's', 'Session picker', 'bind s choose-tree -Zs'),
+    ('prefix', 's', 'Session picker: letter shortcuts and custom order', 'bind s run-shell -C "display-popup -EE -w 80% -h 75% -T \'Sessions\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} \'exec \\"\\$HOME/.local/bin/tmux-sessions\\"\'"'),
     ('prefix', 'w', 'Window picker', 'bind w choose-tree -Zw'),
     ('prefix', 'R', 'Reload configuration', 'bind R source-file ~/.tmux.conf \\; display-message "tmux reloaded"'),
     ('prefix', '?', 'Shortcut cheatsheet', 'bind ? display-popup -EE -w 85% -h 85% -T \'Keys\' \'exec env LESS= LESSOPEN= LESSCLOSE= LESSHISTFILE=- LESSSECURE=1 less -i -P"j/k scroll  / search  q close" "$HOME/.config/tmux/cheatsheet.txt"\''),
@@ -47,6 +56,18 @@ TASK_ACTIONS = {
     "alt-u": ("attention", "attention only"),
     "alt-m": ("seen", "mark seen"),
 }
+SESSION_ACTIONS = {
+    "enter": ("jump", "open"),
+    "e": ("key", "edit key"),
+    "K": ("raise", "move up"),
+    "J": ("lower", "move down"),
+    "shift-up": ("raise", "move up"),
+    "shift-down": ("lower", "move down"),
+    "ctrl-l": ("refresh", "refresh"),
+    "esc": ("cancel", "close"),
+}
+SESSION_NAVIGATION = {"j": "down", "k": "up", "q": "cancel",
+                      "up": "up", "down": "down"}
 FOLDER_ACTIONS = {
     "enter": ("choose", "choose"),
     "tab": ("browse", "browse one level"),
@@ -76,6 +97,10 @@ def key_label(key):
         return "Ctrl+" + key[5:].upper()
     if key.startswith("alt-"):
         return "Alt+" + key[4:]
+    if key.startswith("shift-"):
+        return "Shift+" + key[6:].capitalize()
+    if key.startswith("S-"):
+        return "Shift+" + key[2:]
     return key
 
 
@@ -95,6 +120,11 @@ def prefix_key(helper):
 def action_hint(actions):
     return "  ".join(key_label(key) + " " + (value[2] if len(value) > 2 else value[1])
                      for key, value in actions.items())
+
+
+def session_reserved_hint():
+    return "/".join(key for key in (*SESSION_NAVIGATION, *SESSION_ACTIONS)
+                    if len(key) == 1 and key.isalpha())
 
 
 def fzf_bindings(actions):
@@ -201,14 +231,18 @@ def cheatsheet():
             binding("Previous task", "tmux-tasks", previous=True),
             binding("Previous session", "switch-client -l"),
             binding("Previous window", "last-window"),
-            binding("Session / window picker", "choose-tree -Zs", "choose-tree -Zw"),
+            binding("Session / window picker", "tmux-sessions", "choose-tree -Zw"),
         ]),
         ("Windows & panes", [
             binding("New shell window (current folder)", "new-window"),
             binding("Shell split: beside / below", "split-window -h", "split-window -v"),
             binding("Move left / down / up / right", "select-pane -L", "select-pane -D", "select-pane -U", "select-pane -R"),
             binding("Resize left / down / up / right", "resize-pane -L", "resize-pane -D", "resize-pane -U", "resize-pane -R"),
-            binding("Zoom / unzoom pane", "resize-pane -Z"),
+            binding("Swap pane left", "{left-of}"),
+            binding("Swap pane down", "{down-of}"),
+            binding("Swap pane up", "{up-of}"),
+            binding("Swap pane right", "{right-of}"),
+            binding("Zoom / unzoom pane", "bind z resize-pane -Z"),
         ]),
         ("Copy & settings", [
             binding("Copy mode (v selects, y copies)", "copy-mode"),
@@ -227,6 +261,14 @@ def cheatsheet():
         lines.append("  Other controls")
         rows(extra, indent=4)
         lines.append("")
+
+    heading("SESSIONS  |  Ctrl+A " + prefix_key("tmux-sessions"),
+            "Inside popup: letter keys jump directly. Order and keys persist privately by session name.")
+    rows([("j/k or Up/Down", "Select a session"), ("Letter", "Jump to its session")])
+    rows(actions(SESSION_ACTIONS, {"jump": "Open selected session", "key": "Assign a letter; Backspace clears",
+                                 "raise": "Move selected session up", "lower": "Move selected session down"}))
+    rows([("q", "Close"), ("While assigning", "Letter saves; Esc cancels. " + session_reserved_hint() + " are reserved.")])
+    lines.append("")
 
     heading("WORKSPACE  |  Ctrl+A " + prefix_key("tmux-workspace"),
             "Inside popup: no prefix. Last agent is remembered.")

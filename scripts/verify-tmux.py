@@ -55,7 +55,7 @@ def main():
         recovery_helper = fixture_home / ".local/bin/tmux-agent"
         shutil.copyfile(config.parent / "dot_local/bin/executable_tmux-agent", recovery_helper)
         recovery_helper.chmod(0o700)
-        for name in ("tmux-tasks", "tmux-review", "tmux-attention"):
+        for name in ("tmux-tasks", "tmux-review", "tmux-attention", "tmux-sessions"):
             shutil.copyfile(config.parent / ("dot_local/bin/executable_" + name), helper.parent / name)
             (helper.parent / name).chmod(0o700)
         shutil.copyfile(config.parent / "dot_local/bin/tmux_keys.py", helper.parent / "tmux_keys.py")

@@ -95,6 +95,9 @@ in BOOTSTRAP.md and machine-specific records outside Git.
 - Keep shortcuts in `home/dot_local/bin/tmux_keys.py`; regenerate with
   `python3 scripts/sync-tmux-keys.py`. Its `--check` mode and CI reject stale bindings/help.
   Apply the catalog, affected helpers, configuration, and cheatsheet together.
+- Tmux pane-swap sources can use a globally marked pane even with `-s .`.
+  Freeze the invoking pane ID with native `run-shell -C`, pass it explicitly,
+  and verify swaps with a marked pane in another attached client's session.
 - Terminal control sequences can split words in captured PTY output. Normalize
   them before readiness checks, or timings can measure a later redraw instead.
 - Match verification to the behavior we own. Use short isolated checks for simple
@@ -247,6 +250,7 @@ confirmation is pending. No new dependency, watcher, or tmux restart is needed.
 | ? | Shortcut cheatsheet; j/k scroll, / searches, q closes |
 | c / \| / - | New window / horizontal split / vertical split |
 | h/j/k/l / H/J/K/L | Move / resize panes |
+| Shift+Arrow | Swap active pane with neighbor; keep its focus |
 | z / Tab | Zoom / previous window |
 | s / w | Session / window picker |
 | N (Shift+N) / b | Workspace launcher / return to the previous session |
@@ -260,6 +264,25 @@ Ctrl+A, ? opens the managed ~/.config/tmux/cheatsheet.txt in less, on demand.
 Apply that file with the tmux configuration; no help/history files are written at runtime.
 Verified on an isolated server at 120x40 and 70x24: scrolling/search/close,
 ~26 ms first paint, chezmoi dry-run/reruns/restoration, and live-pane preservation.
+
+Ctrl+A, s uses an on-demand curses session picker. Stable letter keys jump;
+j/k or arrows selects, Enter opens, e edits its key (Backspace clears,
+Esc cancels; e/j/k/q/J/K reserved), J/K moves the selected session down/up
+(Shift+Down/Up also works). Ctrl+L refreshes, and Esc/q closes. Private 0600 preferences under
+`$XDG_STATE_HOME/dotfiles/sessions/` retain keys/order by session name across
+reopening/layout restores; concurrent edits merge under a private lock. Previously
+saved e/J/K shortcuts migrate to available letters. This order applies to this
+picker, without changing native IDs or other pickers.
+Ctrl+A, Shift+Arrow swaps panes inside the current window, preserving focus,
+IDs/processes/labels/attention. It reveals zoom first and stops at outer edges.
+No process is launched for swaps; the picker blocks on input without polling.
+Ubuntu/tmux 3.4 pilot, 2026-10-08: current-source session/pane and baseline checks
+passed with isolated two-client PTYs at 120/70 columns, including concurrent
+preferences, stale/malformed state, marked-pane routing, focus and metadata.
+First inventory ~3 ms, popup ~64/70 ms, one-second idle CPU sample 0%.
+Scoped chezmoi preview/dry-run/reruns/restoration passed; applied with private
+backups, preserving all nine pane IDs/PIDs, layouts, client, override and continuum
+hook. Physical modified-arrow delivery and other platforms remain unverified.
 
 Ctrl+A, Shift+N opens one Workspace menu. j/k chooses Scratch task (a private
 folder and named window), New agent pane (another agent in the current window/folder),
@@ -285,9 +308,10 @@ session. Reopening a live task preserves its window/conversation, regardless of
 the menu's agent choice. Closing its window keeps files; reopening starts a fresh
 conversation, not exact agent recovery.
 The helpers run only on demand and require Python 3.8+ with curses, tmux, and Git.
-The commands are `tmux-workspace`, `tmux-scratch`, `tmux-agent`, `tmux-tasks`, `tmux-review`, and `tmux-attention`.
+The commands are `tmux-workspace`, `tmux-scratch`, `tmux-agent`, `tmux-tasks`,
+`tmux-review`, `tmux-attention`, and `tmux-sessions`.
 The menu waits for key input without polling; the recovery helper replaces itself with the CLI.
-Apply the tmux configuration, all six helpers, and `tmux_keys.py` together.
+Apply the tmux configuration, all seven helpers, and `tmux_keys.py` together.
 Scratch roots inside Git checkouts are rejected. Override the root privately in
 ~/.tmux.local.conf with `set-environment -g DOTFILES_SCRATCH_ROOT '/absolute/path'`.
 Inside the popup, f picks a folder for a new session and suggests its basename as
@@ -318,7 +342,7 @@ Labels/hiding/history stay in private tmux options; hiding and previous-task his
 reset when the server exits. Managed labels enter the next agent recovery snapshot.
 Reviews open in the selected folder; multiple tasks sharing one checkout still
 review the same changes until worktrees are added. Task worktrees, resource
-associations, broader attention signal coverage, and pane moves remain open.
+associations, broader attention signal coverage, and moves between windows remain open.
 
 Attention uses one normalized event reducer and native Codex/Claude adapters.
 Ctrl+A a jumps to the next request/error/unread response; Ctrl+A Shift+A opens
@@ -395,6 +419,7 @@ Run the isolated tmux checks with Python 3.8+, tmux, Git, and fzf:
 
 ```sh
 python3 scripts/verify-tmux.py
+python3 scripts/verify-sessions.py
 python3 scripts/verify-tasks.py
 python3 scripts/verify-reviews.py
 python3 scripts/verify-attention.py

@@ -207,6 +207,26 @@ nvim --headless -u NONE -c 'helptags ~/.config/nvim/doc' -c qa
 
 Ctrl+A, ? opens the shortcut cheatsheet: j/k scrolls, / searches, and q closes.
 
+Ctrl+A, **s** opens the session picker with stable letter shortcuts instead of
+numbered rows. Press a displayed letter to jump, or j/k (Up/Down) then Enter.
+**e** edits the selected session's shortcut; Backspace clears it and Esc cancels.
+**j/k** selects down/up; **J/K** moves the selected session down/up in this list
+(Shift+Down/Up also works). e/j/k/q/J/K are reserved for these controls.
+**Ctrl+L** refreshes and Esc/q closes. Keys are case-sensitive and
+initially chosen from session names. Order and keys persist by name in private
+`$XDG_STATE_HOME/dotfiles/sessions/preferences.json` (default under
+`~/.local/state/`), including reopened/restored sessions with the same name.
+This order applies to this picker; tmux's native IDs and other pickers retain
+their own order. Ctrl+A, w continues to open the native window tree.
+Earlier shortcuts using e/J/K automatically receive another available letter;
+session order and other shortcuts stay saved.
+
+Ctrl+A, **Shift+Arrow** swaps the active pane with its neighbor in that direction,
+keeping focus on the same running process. At an outer edge it stays put; a zoomed
+pane reveals its layout before moving. h/j/k/l selects panes and H/J/K/L resizes
+them. Pane labels, agent IDs and attention stay with the pane. These keys move
+panes within the current window; they do not move them between sessions.
+
 Ctrl+A, g searches sessions, windows, pane labels, tools, and folders. Enter jumps;
 Alt+s opens a shell in the selected folder, and Ctrl+R opens its local review.
 Ctrl+A, Shift+B returns to the previous task. Workspace (Ctrl+A, Shift+N) also has
@@ -275,6 +295,7 @@ python3 scripts/inspect-machine.py --json
 zsh -n home/dot_zshenv
 zsh -n home/dot_zshrc
 python3 scripts/verify-tmux.py
+python3 scripts/verify-sessions.py
 python3 scripts/verify-tasks.py
 python3 scripts/verify-reviews.py
 python3 scripts/sync-tmux-keys.py --check

@@ -1,0 +1,322 @@
+#!/usr/bin/env python3
+"""On-demand session shortcuts/order. Native session IDs and processes stay intact.
+
+Preferences follow session names across reopening/layout restoration. Curses blocks
+on input; discovery and private writes happen only on open or an explicit action.
+"""
+
+import argparse
+from contextlib import contextmanager
+import curses
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import runpy
+import shlex
+import stat
+import string
+import subprocess
+import sys
+import tempfile
+
+
+KEYS = runpy.run_path(str(Path(__file__).with_name("tmux_keys.py")))
+ACTIONS = KEYS["SESSION_ACTIONS"]
+NAVIGATION = KEYS["SESSION_NAVIGATION"]
+LETTERS = "".join(key for key in string.ascii_letters if key not in NAVIGATION and key not in ACTIONS)
+RESERVED_HINT = KEYS["session_reserved_hint"]()
+os.environ.setdefault("ESCDELAY", "25")
+
+
+def runner(socket):
+    def run(*args):
+        result = subprocess.run(["tmux", "-S", socket] + list(args),
+                                capture_output=True, text=True, timeout=5)
+        if result.returncode:
+            raise ValueError(result.stderr.strip() or "tmux command failed")
+        return result.stdout.rstrip("\n")
+    return run
+
+
+def inventory(run):
+    rows = []
+    for line in run("list-sessions", "-F",
+                    "#{session_id}\t#{session_name}\t#{session_windows}\t#{session_attached}").splitlines():
+        values = line.split("\t")
+        if len(values) != 4 or not re.fullmatch(r"\$[0-9]+", values[0]):
+            raise ValueError("A session has an unsupported name or ID.")
+        rows.append(dict(zip(("id", "name", "windows", "attached"), values)))
+    return rows
+
+
+def client_context(run, client):
+    # display-message -c does not establish the invoking client's pane context.
+    for line in run("list-clients", "-F", "#{client_name}\t#{client_pid}\t#{session_id}").splitlines():
+        name, pid, session = line.split("\t")
+        if name == client:
+            return pid, session
+    raise ValueError("The invoking tmux client is no longer attached.")
+
+
+@contextmanager
+def preferences_lock():
+    base = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state")))
+    if not base.is_absolute():
+        raise ValueError("XDG_STATE_HOME must be absolute.")
+    root = base / "dotfiles/sessions"
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = root.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError("Session preferences need an owned, private directory: " + str(root))
+    fd = os.open(str(root / "preferences.lock"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise ValueError("Session preference lock must be an owned, private file.")
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield root / "preferences.json"
+    finally:
+        os.close(fd)
+
+
+def read_preferences(path):
+    if not path.exists() and not path.is_symlink():
+        return {"version": 1, "order": [], "keys": {}}
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError("Session preferences must be an owned, private file.")
+    data = json.loads(path.read_text())
+    if (not isinstance(data, dict) or data.get("version") != 1
+            or not isinstance(data.get("order"), list) or not isinstance(data.get("keys"), dict)):
+        raise ValueError("Invalid session preferences; restore or correct " + str(path))
+    order, shortcuts = data["order"], data["keys"]
+    if (any(not isinstance(name, str) for name in order) or len(set(order)) != len(order)
+            or any(not isinstance(name, str) or not isinstance(key, str)
+                   # Accept prior letter assignments; session_rows migrates keys
+                   # newly reserved for picker actions without discarding order.
+                   or (key and (len(key) != 1 or key not in string.ascii_letters
+                                or key in NAVIGATION)) for name, key in shortcuts.items())):
+        raise ValueError("Invalid session order or shortcut.")
+    assigned = [key for key in shortcuts.values() if key]
+    if len(set(assigned)) != len(assigned):
+        raise ValueError("Duplicate session shortcuts in " + str(path))
+    return data
+
+
+def save_preferences(path, data):
+    # Same-directory replace makes every reader see a complete 0600 document.
+    fd, temporary = tempfile.mkstemp(prefix=".preferences-", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(data, stream, ensure_ascii=True, indent=2)
+            stream.write("\n")
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def session_rows(run, action=None, name=None, key=None):
+    # Re-read inventory and preferences under the lock. Concurrent pickers merge
+    # changes rather than overwriting each other's earlier snapshot.
+    with preferences_lock() as path:
+        rows = inventory(run)
+        data = read_preferences(path)
+        before = json.dumps(data, sort_keys=True)
+        order, shortcuts = data["order"], data["keys"]
+
+        def available_key(name):
+            return next((letter for letter in name.lower() + LETTERS
+                         if letter in LETTERS and letter not in shortcuts.values()), "")
+
+        for previous_name, assigned in list(shortcuts.items()):
+            if assigned and assigned not in LETTERS:
+                shortcuts[previous_name] = available_key(previous_name)
+        for row in rows:
+            if row["name"] not in order:
+                order.append(row["name"])
+            if row["name"] not in shortcuts:
+                shortcuts[row["name"]] = available_key(row["name"])
+        live = {row["name"] for row in rows}
+        if action in ("key", "raise", "lower") and name not in live:
+            raise ValueError("That session closed. Press Ctrl+L to refresh.")
+        if action == "key":
+            if not isinstance(key, str) or (key and (len(key) != 1 or key not in LETTERS)):
+                raise ValueError("Choose a letter; " + RESERVED_HINT + " are reserved.")
+            owner = next((other for other, assigned in shortcuts.items()
+                          if key and assigned == key and other != name), None)
+            if owner in live:
+                raise ValueError("Key " + key + " belongs to " + safe_text(owner) + ". Clear it there first.")
+            if owner:
+                # An explicit assignment may reclaim a closed session's key.
+                shortcuts[owner] = ""
+            shortcuts[name] = key
+        elif action in ("raise", "lower"):
+            visible = [entry for entry in order if entry in live]
+            index = visible.index(name)
+            adjacent = index + (-1 if action == "raise" else 1)
+            if 0 <= adjacent < len(visible):
+                first, second = order.index(name), order.index(visible[adjacent])
+                order[first], order[second] = order[second], order[first]
+        if json.dumps(data, sort_keys=True) != before:
+            save_preferences(path, data)
+        rows.sort(key=lambda row: order.index(row["name"]))
+        for row in rows:
+            row["key"] = shortcuts[row["name"]]
+        return rows
+
+
+def safe_text(value):
+    return "".join(character if character.isprintable() else "?" for character in value)
+
+
+def read_key(screen):
+    key = screen.get_wch()
+    if key == "\x1b":
+        # Distinguish a lone Escape from Alt+letter, without any idle polling.
+        screen.timeout(25)
+        try:
+            following = screen.get_wch()
+            return "alt-" + following if isinstance(following, str) else "esc"
+        except curses.error:
+            return "esc"
+        finally:
+            screen.timeout(-1)
+    known = {curses.KEY_UP: "up", curses.KEY_DOWN: "down",
+             curses.KEY_SR: "shift-up", curses.KEY_SF: "shift-down",
+             curses.KEY_BACKSPACE: "backspace", curses.KEY_DC: "backspace",
+             curses.KEY_ENTER: "enter", curses.KEY_RESIZE: "resize",
+             "\n": "enter", "\r": "enter", "\x7f": "backspace",
+             "\b": "backspace", "\x0c": "ctrl-l", "\x03": "esc"}
+    if key in known:
+        return known[key]
+    if isinstance(key, int):
+        # Some terminfo implementations expose extended names rather than KEY_SR/SF.
+        return {b"kUP": "shift-up", b"kDN": "shift-down"}.get(curses.keyname(key), "unknown")
+    return key
+
+
+def picker(screen, run, client, identity):
+    screen.keypad(True)
+    curses.curs_set(0)
+    if curses.has_colors():
+        curses.start_color()
+        curses.use_default_colors()
+        curses.init_pair(1, 111 if curses.COLORS >= 256 else curses.COLOR_CYAN, -1)
+        curses.init_pair(2, 153 if curses.COLORS >= 256 else curses.COLOR_WHITE,
+                         237 if curses.COLORS >= 256 else curses.COLOR_BLUE)
+    rows = session_rows(run)
+    selected = next((i for i, row in enumerate(rows) if row["id"] == identity[1]), 0)
+    message, editing = "", False
+    while rows:
+        height, width = screen.getmaxyx()
+        screen.erase()
+
+        def put(y, text, attribute=0):
+            if 0 <= y < height:
+                try:
+                    screen.addnstr(y, 1, safe_text(text), max(0, width - 3), attribute)
+                except curses.error:
+                    pass
+
+        put(0, "Session shortcuts", curses.color_pair(1) | curses.A_BOLD)
+        put(1, "Letter opens  |  j/k selects  |  * current")
+        capacity = max(1, height - 7)
+        start = max(0, min(selected - capacity + 1, max(0, len(rows) - capacity)))
+        for i, row in enumerate(rows[start:start + capacity], start):
+            mark = "*" if row["id"] == identity[1] else " "
+            label = mark + " [" + (row["key"] or "-") + "] " + row["name"]
+            label += "  (" + row["windows"] + " windows)"
+            put(3 + i - start, label, curses.color_pair(2) | curses.A_BOLD if i == selected else 0)
+        def hint(action, label=True):
+            key = KEYS["action_key"](ACTIONS, action)
+            return KEYS["key_label"](key) + (" " + ACTIONS[key][1] if label else "")
+
+        put(height - 3, hint("key") + " | " + hint("lower", False) + "/" + hint("raise", False) + " move down/up")
+        put(height - 2, hint("jump") + "  |  " + hint("refresh") + "  |  " + hint("cancel") + "/q")
+        put(height - 1, "Key: letter saves; Backspace clears; Esc cancels" if editing else message,
+            curses.color_pair(1))
+        screen.refresh()
+        key = read_key(screen)
+        if key == "resize":
+            continue
+        row = rows[selected]
+        try:
+            if editing:
+                if key == "esc":
+                    editing, message = False, "Key unchanged."
+                    continue
+                if key != "backspace" and key not in LETTERS:
+                    message = "Choose a letter; " + RESERVED_HINT + " are reserved."
+                    editing = False
+                    continue
+                rows = session_rows(run, "key", row["name"], "" if key == "backspace" else key)
+                editing, message = False, "Key saved."
+            elif key in NAVIGATION:
+                action = NAVIGATION[key]
+                if action == "cancel":
+                    return None
+                selected = max(0, min(len(rows) - 1, selected + (-1 if action == "up" else 1)))
+            elif key in ACTIONS:
+                action = ACTIONS[key][0]
+                if action == "cancel":
+                    return None
+                if action == "jump":
+                    return row
+                if action == "key":
+                    editing, message = True, ""
+                else:
+                    rows = session_rows(run, action, row["name"])
+                    selected = next((i for i, entry in enumerate(rows) if entry["id"] == row["id"]),
+                                    min(selected, max(0, len(rows) - 1)))
+                    message = "Order saved." if action != "refresh" else "Refreshed."
+            else:
+                match = next((entry for entry in rows if entry["key"] == key), None)
+                if match:
+                    return match
+        except ValueError as error:
+            editing, message = False, str(error)
+    return None
+
+
+def jump(run, client, identity, row):
+    if client_context(run, client) != identity:
+        raise ValueError("The invoking client changed; reopen the picker.")
+    if not any(entry["id"] == row["id"] and entry["name"] == row["name"] for entry in inventory(run)):
+        raise ValueError("That session closed or was renamed; reopen the picker.")
+    # Queue switching after closing this popup, avoiding its saved context.
+    commands = [shlex.join(["display-popup", "-C", "-c", client]),
+                shlex.join(["switch-client", "-c", client, "-t", row["id"]])]
+    run("run-shell", "-b", "-C", " ; ".join(commands))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--list", action="store_true", help="List ordered sessions and letter keys as JSON")
+    args = parser.parse_args()
+    socket = os.environ.get("DOTFILES_TMUX_SOCKET") or os.environ.get("TMUX", "").split(",")[0]
+    if not socket:
+        raise ValueError("Run this helper inside tmux.")
+    run = runner(socket)
+    if args.list:
+        print(json.dumps(session_rows(run), ensure_ascii=True))
+        return
+    client = os.environ.get("DOTFILES_TMUX_CLIENT")
+    if not client:
+        raise ValueError("Open the session picker with Ctrl+A, s.")
+    identity = client_context(run, client)
+    row = curses.wrapper(picker, run, client, identity)
+    if row:
+        jump(run, client, identity, row)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(0)
+    except (ValueError, OSError, subprocess.TimeoutExpired, curses.error) as error:
+        print("tmux-sessions: " + str(error), file=sys.stderr)
+        sys.exit(1)

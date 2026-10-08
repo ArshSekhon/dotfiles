@@ -22,6 +22,10 @@ TMUX  |  Press Ctrl+A, then a key
     | / -           Shell split: beside / below
     h / j / k / l   Move left / down / up / right
     H / J / K / L   Resize left / down / up / right
+    Shift+Left      Swap pane left
+    Shift+Down      Swap pane down
+    Shift+Up        Swap pane up
+    Shift+Right     Swap pane right
     z               Zoom / unzoom pane
 
   Copy & settings
@@ -29,6 +33,24 @@ TMUX  |  Press Ctrl+A, then a key
     ?               This cheatsheet
     R               Reload configuration
     Ctrl+A          Send Ctrl+A to the application
+
+SESSIONS  |  Ctrl+A s
+------------------------------------------------------
+  Inside popup: letter keys jump directly. Order and
+  keys persist privately by session name.
+  j/k or Up/Down    Select a session
+  Letter            Jump to its session
+  Enter             Open selected session
+  e                 Assign a letter; Backspace clears
+  K                 Move selected session up
+  J                 Move selected session down
+  Shift+Up          Move selected session up
+  Shift+Down        Move selected session down
+  Ctrl+L            refresh
+  Esc               close
+  q                 Close
+  While assigning   Letter saves; Esc cancels.
+                    j/k/q/e/K/J are reserved.
 
 WORKSPACE  |  Ctrl+A N
 ------------------------------------------------------

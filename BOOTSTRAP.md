@@ -19,7 +19,7 @@ not targets.
 | Configuration management | Git, chezmoi | Repository access, configuration preview/application |
 | Shared tmux setup | tmux | Sessions, panes, popups; verified with 3.4, other versions need checks |
 | Shortcut cheatsheet | less | On-demand scrolling/search; manage ~/.config/tmux/cheatsheet.txt with the tmux configuration |
-| Workspace/scratch helpers | Python 3.8+ with curses, tmux, Git | Launcher UI and scratch-folder safety; apply the tmux configuration and all six helpers plus `tmux_keys.py` together |
+| Workspace/session/scratch helpers | Python 3.8+ with curses, tmux, Git | Launcher/session UI and scratch-folder safety; apply the tmux configuration and all seven helpers plus `tmux_keys.py` together |
 | Agent launching/recovery | Selected Codex and/or Claude Code CLI with SessionStart hooks; tmux-resurrect for layouts | Available in tmux's PATH; exact IDs and credentials stay private |
 | Agent attention | Native Codex/Claude hooks, Python, tmux; fzf for the queue | Shared event reducer and cached native status; no daemon or transcript inspection |
 | Agent status lines | Native Codex footer; POSIX sh, jq, Git for Claude; Python 3.11+ during setup only | Model/effort/context/branch; explicit personal mode adds subscription headroom |
@@ -35,10 +35,12 @@ not targets.
 | Future task workflows | Task worktrees/resource associations | Broader task organization remains planned |
 
 Managed helper sources are `home/dot_local/bin/executable_tmux-workspace`,
-`executable_tmux-scratch`, `executable_tmux-agent`, `executable_tmux-tasks`, `executable_tmux-review`, and `executable_tmux-attention`
+`executable_tmux-scratch`, `executable_tmux-agent`, `executable_tmux-tasks`,
+`executable_tmux-review`, `executable_tmux-attention`, and `executable_tmux-sessions`
 with the shared `tmux_keys.py` catalog. Chezmoi's [`executable_` attribute](https://www.chezmoi.io/reference/source-state-attributes/)
 marks executable permissions; the installed commands are `~/.local/bin/tmux-workspace`
-`~/.local/bin/tmux-scratch`, `~/.local/bin/tmux-agent`, `~/.local/bin/tmux-tasks`, `~/.local/bin/tmux-review`, and `~/.local/bin/tmux-attention`.
+`~/.local/bin/tmux-scratch`, `~/.local/bin/tmux-agent`, `~/.local/bin/tmux-tasks`,
+`~/.local/bin/tmux-review`, `~/.local/bin/tmux-attention`, and `~/.local/bin/tmux-sessions`.
 When updating an older setup, back up the retired `dotfiles-agent` and
 `dotfiles-scratch` helper files and remove them after verifying the new bindings.
 
@@ -138,9 +140,37 @@ When asked to bootstrap:
    versions, changes, restoration paths, skipped features, and actual verification
    limits; real SSH clipboard and agent recovery require their own checks.
 
+## Session ordering and pane movement
+
+Ctrl+A, s uses the curses `tmux-sessions` popup; apply that executable,
+`tmux_keys.py`, the tmux configuration and cheatsheet together. Letter keys and
+custom ordering are private, keyed by session name rather than reboot-sensitive
+native IDs. Preferences live in `$XDG_STATE_HOME/dotfiles/sessions/` (default
+`~/.local/state/dotfiles/sessions/`): owned 0700 directory, 0600 JSON/lock, locked
+read/merge/atomic writes. No watcher, polling or new package is needed. Preserve
+the JSON when restoring/migrating layouts; renaming a session creates a new entry.
+An explicit key assignment can reclaim a closed session's key; active duplicates
+are refused. See README.md and Ctrl+A, ? for the popup controls.
+Inside the picker, j/k selects down/up, J/K reorders down/up, and e edits a
+shortcut. Previously saved e/J/K shortcuts migrate to available letters while
+preserving session order and unaffected keys; blank shortcuts remain blank.
+
+Shift-arrow pane swaps use native tmux commands, capture the invoking pane's
+exact ID, keep its focus, reveal zoomed layouts and stop at outer edges. IDs,
+processes and pane-local options survive swapping. Run
+`python3 scripts/verify-sessions.py` for isolated two-client picker/order/key,
+concurrent preference writes, and spatial-pane checks at 120/70 columns. Physical
+terminal delivery of modified arrows remains a client check. On the Ubuntu pilot,
+reload only the changed bindings to preserve the legacy continuum status hook;
+after any full configuration reload, check that the hook is still present.
+Pilot backups live under `$XDG_STATE_HOME/dotfiles/backups/tmux-sessions-*/`.
+The private manifest records original files/modes (or new targets) and the five
+prior bindings. Restore those files and bindings, unbinding keys previously absent;
+retain intervening private changes. No full reload or session restart is required.
+
 ## Agent recovery setup
 
-Apply the tmux configuration and all six helpers plus `tmux_keys.py` together. Install tmux-resurrect
+Apply the tmux configuration and all seven helpers plus `tmux_keys.py` together. Install tmux-resurrect
 and optionally continuum separately; keep the pilot's existing private TPM loader.
 The shared config uses resurrect's post-save-layout hook to replace only managed
 agent commands with immutable recovery snapshots. Private overrides load last;
