@@ -32,7 +32,7 @@ def main():
         home = root / "home ' quoted"
         tools = home / ".local/bin"
         tools.mkdir(parents=True)
-        for name in ("tmux-tasks", "tmux-workspace", "tmux-review", "tmux-agent"):
+        for name in ("tmux-tasks", "tmux-workspace", "tmux-review", "tmux-agent", "tmux-attention"):
             shutil.copyfile(repo / "home/dot_local/bin" / ("executable_" + name), tools / name)
             (tools / name).chmod(0o700)
         shutil.copyfile(repo / "home/dot_local/bin/tmux_keys.py", tools / "tmux_keys.py")

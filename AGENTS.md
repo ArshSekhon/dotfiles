@@ -30,7 +30,7 @@ review object is required. Keep comments/progress private, return feedback to th
 selected agent, and review its fixes. Publishing remains a separate user action.
 Review queue, on-demand Git UI, focused agent reviews, and task worktree helpers
 are proposed additions. Tuicr supplies local comment-based reviews and private, task-specific feedback.
-Automatic attention events and worktree helpers remain open. Verify changed revisions
+Native attention adapters are implemented; signal coverage and worktree helpers remain open. Verify changed revisions
 and saved comments; actual SSH clipboard still needs a client check.
 
 ## Devices
@@ -102,6 +102,11 @@ in BOOTSTRAP.md and machine-specific records outside Git.
   failure modes. Avoid maintaining tests of upstream tools and plugins.
 - Scoped chezmoi directory previews need `diff --recursive`; first application
   needs `--parent-dirs` when ancestors are missing. Verify nested files explicitly.
+- Agent attention needs a shared event contract with per-harness adapters and
+  explicit signal coverage. Turn-end hooks can precede continuation or background
+  work; they do not prove task completion. Separate alert acknowledgement from
+  request resolution, reject stale invocations, and verify installed-version
+  payloads. Silence and pane focus cannot establish that input was answered.
 
 ## Implemented and verification
 
@@ -227,6 +232,7 @@ confirmation is pending. No new dependency, watcher, or tmux restart is needed.
 | s / w | Session / window picker |
 | N (Shift+N) / b | Workspace launcher / return to the previous session |
 | g / B (Shift+B) | Search existing tasks/panes / return to the previous task |
+| a / A (Shift+A) | Next agent needing attention / attention queue |
 | r | Local tuicr review popup; reports a missing tool |
 | R | Reload installed tmux configuration |
 | [ | Copy mode; v selects, y copies |
@@ -260,9 +266,9 @@ session. Reopening a live task preserves its window/conversation, regardless of
 the menu's agent choice. Closing its window keeps files; reopening starts a fresh
 conversation, not exact agent recovery.
 The helpers run only on demand and require Python 3.8+ with curses, tmux, and Git.
-The commands are `tmux-workspace`, `tmux-scratch`, `tmux-agent`, `tmux-tasks`, and `tmux-review`.
+The commands are `tmux-workspace`, `tmux-scratch`, `tmux-agent`, `tmux-tasks`, `tmux-review`, and `tmux-attention`.
 The menu waits for key input without polling; the recovery helper replaces itself with the CLI.
-Apply the tmux configuration, all five helpers, and `tmux_keys.py` together.
+Apply the tmux configuration, all six helpers, and `tmux_keys.py` together.
 Scratch roots inside Git checkouts are rejected. Override the root privately in
 ~/.tmux.local.conf with `set-environment -g DOTFILES_SCRATCH_ROOT '/absolute/path'`.
 Inside the popup, f picks a folder for a new session and suggests its basename as
@@ -293,7 +299,46 @@ Labels/hiding/history stay in private tmux options; hiding and previous-task his
 reset when the server exits. Managed labels enter the next agent recovery snapshot.
 Reviews open in the selected folder; multiple tasks sharing one checkout still
 review the same changes until worktrees are added. Task worktrees, resource
-associations, automatic attention events, and pane moves remain open.
+associations, broader attention signal coverage, and pane moves remain open.
+
+Attention uses one normalized event reducer and native Codex/Claude adapters.
+Ctrl+A a jumps to the next request/error/unread response; Ctrl+A Shift+A opens
+the attention queue. Alt+u toggles attention only; Alt+m marks an alert seen.
+Hidden panes remain in the queue, linked windows count once, and picker visits
+acknowledge only the exact current notice after switching the invoking client.
+Acknowledgement never resolves input. Cached native status/window/pane formats
+have no subprocesses at idle. Private tmux options retain last-reported state
+across detach, reset at invocation/server restart, and never enter recovery saves.
+An owned private lock serializes hooks; no event history, daemon, transcript scan,
+screen scraping or polling is added. Invocation nonce/server/pane/PID, conversation
+and available turn IDs reject stale events. Unverified invocations show unavailable.
+Apply via chezmoi, then preview/run `tmux-attention setup`; it merges/backups native
+settings and shares recovery's SessionStart capture. Codex needs `/hooks` trust for
+the new commands. Existing processes keep running without attention adoption.
+Stop is provisional; continuation retracts ready. Claude in-flight background jobs
+suppress ready, tool failures stay recoverable, and idle/auth notifications are
+ignored. Approval resolution is delayed until tool completion; native same-tool
+requests may coalesce. Codex specialized question paths, asynchronous questions,
+child input, background completion, silent failures and Claude interruption lack
+complete signal coverage. See BOOTSTRAP.md for the contract and precise limits.
+
+Ubuntu attention checks, 2026-10-07: current-source synthetic fixtures passed
+reducer/adapter translation, identity/turn guards, concurrent updates, additive
+hook merging/backups/reruns, private modes, acknowledgement versus resolution,
+linked/hidden panes, native cleanup, and two-client fzf navigation. Event plus
+state-read median ~47 ms, attention popup ~93 ms, one-second server idle sample
+0% CPU; no attention process stays resident. Recovery with attention present,
+baseline tmux/task/review checks and scoped chezmoi preservation/restoration passed.
+Two synthetic agent launches with capture/reset took ~371 ms total; restore ~503 ms.
+Codex 0.160.1 and Claude 2.1.246 delivered SessionStart, UserPromptSubmit, shell
+Pre/PostToolUse, Stop and SessionEnd in isolated localhost-provider fixtures; Stop
+produced ready before exit. Native approvals/questions/elicitation/failures/interrupts,
+physical clients and other platforms remain to verify. These are small-fixture
+checks, not a multi-agent load baseline; physical sessions were not used as fixtures.
+The pilot helper/configuration/help and additive native settings are applied with
+private restoration manifests; all nine pane processes/layouts, the attached client,
+private override and active continuum status hook were preserved. Codex hook trust
+is a user step in a new managed session; existing processes remain unadopted.
 
 Exact recovery is implemented for registered panes: lifecycle hooks record a UUID,
 and layout saves freeze it with the folder, tool, and pane label in private snapshots.
@@ -333,6 +378,7 @@ Run the isolated tmux checks with Python 3.8+, tmux, Git, and fzf:
 python3 scripts/verify-tmux.py
 python3 scripts/verify-tasks.py
 python3 scripts/verify-reviews.py
+python3 scripts/verify-attention.py
 python3 scripts/sync-tmux-keys.py --check
 ```
 
@@ -417,7 +463,8 @@ These are observed versions, not installation targets; tmux is now applied as ab
    named-pane captions, the folder picker, and task/agent navigation are implemented.
    Exact-ID recovery is implemented and tested on an isolated server; native hook
    capture passed offline checks. **Next:** real conversation recovery verification,
-   then reliable attention events and task worktrees. Local review/feedback and generated
+   then real attention signal/user-terminal checks and task worktrees. Native attention
+   adapters, local review/feedback and generated
    shortcut help are implemented; actual user-terminal checks remain.
    Use the home/ chezmoi source and add stable tool setup needed for this milestone.
    Measure overhead; test recovery on an isolated server before applying changes.

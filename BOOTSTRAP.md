@@ -19,8 +19,9 @@ not targets.
 | Configuration management | Git, chezmoi | Repository access, configuration preview/application |
 | Shared tmux setup | tmux | Sessions, panes, popups; verified with 3.4, other versions need checks |
 | Shortcut cheatsheet | less | On-demand scrolling/search; manage ~/.config/tmux/cheatsheet.txt with the tmux configuration |
-| Workspace/scratch helpers | Python 3.8+ with curses, tmux, Git | Launcher UI and scratch-folder safety; apply the tmux configuration and all five helpers plus `tmux_keys.py` together |
+| Workspace/scratch helpers | Python 3.8+ with curses, tmux, Git | Launcher UI and scratch-folder safety; apply the tmux configuration and all six helpers plus `tmux_keys.py` together |
 | Agent launching/recovery | Selected Codex and/or Claude Code CLI with SessionStart hooks; tmux-resurrect for layouts | Available in tmux's PATH; exact IDs and credentials stay private |
+| Agent attention | Native Codex/Claude hooks, Python, tmux; fzf for the queue | Shared event reducer and cached native status; no daemon or transcript inspection |
 | Fuzzy selection | fzf | Shell history/file/directory selection, zoxide's `zi`, tmux folder/task pickers, and the full tmux verification suite |
 | Local reviews | tuicr, Neovim (`nvim`), Git, less | Private local comments/export and guarded feedback preparation; the editor wrapper keeps normal Neovim paths |
 | Interactive shell | Current stable Zsh, zsh-autosuggestions, zsh-syntax-highlighting; fzf integration; fd/fdfind when available | Native Vim editing/completion/history, suggestions/highlighting, on-demand fuzzy navigation |
@@ -33,10 +34,10 @@ not targets.
 | Future task workflows | Task worktrees/resource associations | Broader task organization remains planned |
 
 Managed helper sources are `home/dot_local/bin/executable_tmux-workspace`,
-`executable_tmux-scratch`, `executable_tmux-agent`, `executable_tmux-tasks`, and `executable_tmux-review`
+`executable_tmux-scratch`, `executable_tmux-agent`, `executable_tmux-tasks`, `executable_tmux-review`, and `executable_tmux-attention`
 with the shared `tmux_keys.py` catalog. Chezmoi's [`executable_` attribute](https://www.chezmoi.io/reference/source-state-attributes/)
 marks executable permissions; the installed commands are `~/.local/bin/tmux-workspace`
-`~/.local/bin/tmux-scratch`, `~/.local/bin/tmux-agent`, `~/.local/bin/tmux-tasks`, and `~/.local/bin/tmux-review`.
+`~/.local/bin/tmux-scratch`, `~/.local/bin/tmux-agent`, `~/.local/bin/tmux-tasks`, `~/.local/bin/tmux-review`, and `~/.local/bin/tmux-attention`.
 When updating an older setup, back up the retired `dotfiles-agent` and
 `dotfiles-scratch` helper files and remove them after verifying the new bindings.
 
@@ -138,7 +139,7 @@ When asked to bootstrap:
 
 ## Agent recovery setup
 
-Apply the tmux configuration and all five helpers plus `tmux_keys.py` together. Install tmux-resurrect
+Apply the tmux configuration and all six helpers plus `tmux_keys.py` together. Install tmux-resurrect
 and optionally continuum separately; keep the pilot's existing private TPM loader.
 The shared config uses resurrect's post-save-layout hook to replace only managed
 agent commands with immutable recovery snapshots. Private overrides load last;
@@ -179,6 +180,74 @@ private server restart, real plugin restore, duplicate/missing-state failures,
 manual adoption, private settings merging/backups, and repeatability. Use
 `python3 scripts/verify-tmux.py` for launcher/picker checks. No real conversations
 or reboot are exercised by these scripts; verify an actual recovery deliberately.
+
+## Agent attention setup and event contract
+
+Preview `tmux-attention setup --dry-run`, then run `tmux-attention setup` after
+applying the helpers. `--agent codex` or `--agent claude` scopes the merge.
+This adds advisory hooks while preserving other handlers/settings, including
+handlers sharing a group, and writes originals plus manifests under private
+`$XDG_STATE_HOME/dotfiles/backups/attention-hooks-*/`. Restore original bytes/modes
+from those manifests; remove targets recorded as new. Repeated setup is safe.
+SessionStart reuses the recovery capture command to avoid racing identity capture.
+Codex requires review/trust of the added commands through `/hooks` in a new session;
+Claude loads the settings for subsequent sessions. Keep ordinary permission policy.
+
+Attention applies to invocations started by our launcher after this update. Existing
+panes keep running and show unavailable status; manual UUID binding alone cannot
+add the launch nonce/runtime context to an already running process. Do not infer
+identity from transcripts. Attention survives SSH detach in private tmux options,
+but resets on a new invocation/server restart and is not resurrected as old alerts.
+The only disk artifact is a private per-server lock; no event log is maintained.
+Native lifecycle hooks clean closed panes; `tmux-attention refresh` reconciles state
+on demand after manual pane respawns. Array slot 1701 preserves other tmux hooks.
+
+Adapters translate [Codex hooks](https://learn.chatgpt.com/docs/hooks) and
+[Claude hooks](https://code.claude.com/docs/en/hooks) into these shared events:
+
+| Event | Additional metadata | Meaning |
+| --- | --- | --- |
+| `session_started` | None | Initialize a captured conversation |
+| `turn_started` | `turn_id` when available | Clear old alerts/input and report working |
+| `input_requested` | `request_id`, `reason`, optional `tool` | Pending approval/question/plan/elicitation |
+| `input_resolved` | Same `request_id` | Resolve that request |
+| `progress` | Optional resolved `request_id` | Root-agent progress; remaining requests stay pending |
+| `turn_ended` | `outcome`: response/failed/interrupted; optional `background`, `provisional` booleans | Response/error availability or interruption |
+| `session_ended` | None | Clear attention on exit |
+
+Send one JSON object to `tmux-attention report`, containing `version: 1`, `event`,
+and opaque `session_id`, plus the event fields above. Request reasons are `approval`,
+`question`, `plan`, or `elicitation`. Conversation/turn/request IDs are bounded and
+never displayed; prompts, tool arguments/output and transcripts are discarded.
+The shared reducer accepts normalized metadata independently of native hook names.
+Further harnesses still need an explicit launcher/identity adapter; no OpenCode,
+Gemini or other adapter is installed. Reports require the managed launch record,
+invocation nonce, tmux server, pane and original pane PID. Stale sessions/turns,
+replaced invocations and child-agent hook payloads are rejected.
+
+Signals describe the last observed state. Stop hooks precede final continuation
+decisions: response alerts are provisional and withdraw on later root progress.
+Stop alone does not resolve pending input; matching request resolution or a new
+turn/session must supersede it.
+Claude background tasks suppress ready; scheduled crons do not imply active work.
+Permission hooks precede the user's decision, sometimes even an automatic policy
+decision. Resolution arrives at tool completion, so an approval may remain shown
+while its command runs; simultaneous same-tool approvals coalesce when native
+payloads lack request IDs. Claude questions/plans use Pre/PostToolUse, elicitation
+uses its native request/result hooks, and terminal failures use StopFailure.
+Tool failures themselves can be recoverable and do not create error alerts.
+Delayed Claude permission/elicitation notifications are fallbacks; idle/auth and
+teammate notifications are ignored. Claude lacks our native interruption signal.
+Codex question/permission tools are translated only when its local-tool hook path
+emits them; specialized paths can bypass it. Asynchronous questions need a separate
+answer signal and are not inferred from tool completion. Child input routing,
+background completion and silent API failure coverage remain incomplete.
+
+Run `python3 scripts/verify-attention.py` for our reducer, guards, additive setup,
+concurrent events, linked-window counts and real fzf/tmux navigation with synthetic
+agents and two isolated clients. It does not claim native-harness delivery or
+physical-terminal verification. Use the recovery, task and review checks after
+changes to their shared helpers; no live session or provider is needed by the suite.
 
 ## Review and shortcut verification
 

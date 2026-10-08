@@ -1,0 +1,537 @@
+#!/usr/bin/env python3
+"""Event-driven agent attention. Native adapters share one private tmux state model.
+
+No daemon, transcript inspection, output scraping, or idle polling. `report` accepts
+the versioned event contract documented in BOOTSTRAP.md; `hook` translates native
+Codex/Claude payloads. Hook failures never change permissions or steer the model.
+"""
+
+import argparse
+from contextlib import contextmanager
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import runpy
+import subprocess
+import sys
+import time
+import uuid
+
+
+EVENTS = ('session_started', 'turn_started', 'progress', 'input_requested',
+          'input_resolved', 'turn_ended', 'session_ended')
+REASONS = ('approval', 'question', 'plan', 'elicitation')
+FIELDS = ('pane_id', 'window_id', 'pane_pid', 'pane_dead', 'pid', '@dotfiles_agent_record',
+          '@dotfiles_attention_state', '@dotfiles_attention_kind',
+          '@dotfiles_attention_since', '@dotfiles_attention_notice')
+AGENT = None
+
+
+def agent_helpers():
+    global AGENT
+    if AGENT is None:
+        AGENT = runpy.run_path(str(Path(__file__).with_name('tmux-agent')))
+    return AGENT
+
+
+def socket_path():
+    socket = os.environ.get('DOTFILES_TMUX_SOCKET')
+    if not socket:
+        connection = os.environ.get('TMUX', '').rsplit(',', 2)
+        socket = connection[0] if len(connection) == 3 else None
+    if not socket or not Path(socket).is_absolute():
+        raise ValueError('Run inside tmux or supply DOTFILES_TMUX_SOCKET.')
+    return socket
+
+
+def tmux(*args):
+    result = subprocess.run(['tmux', '-S', socket_path()] + list(args),
+                            capture_output=True, text=True, timeout=1)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or 'tmux command failed.')
+    return result.stdout.rstrip('\n')
+
+
+def panes():
+    rows = tmux('list-panes', '-a', '-F', '\t'.join('#{' + key + '}' for key in FIELDS))
+    result = []
+    for row in rows.splitlines():
+        values = row.split('\t')
+        if len(values) != len(FIELDS):
+            raise ValueError('Invalid attention metadata.')
+        result.append(dict(zip(FIELDS, values)))
+    return result
+
+
+@contextmanager
+def server_lock():
+    # Serialize state and aggregate updates across concurrent hooks. Files contain
+    # no events or conversation content; tmux owns the state and its lifetime.
+    helpers = agent_helpers()
+    root = helpers['state_root']().parent / 'attention'
+    helpers['private_directory'](root)
+    digest = hashlib.sha256(socket_path().encode()).hexdigest()[:32]
+    descriptor = os.open(str(root / (digest + '.lock')),
+                         os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    with os.fdopen(descriptor, 'w') as lock:
+        if os.fstat(lock.fileno()).st_uid != os.getuid():
+            raise ValueError('Attention lock must be owned by you.')
+        os.fchmod(lock.fileno(), 0o600)
+        deadline = time.monotonic() + .4
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ValueError('Attention update is busy; try again.')
+                time.sleep(.005)
+        yield
+
+
+def identifier(value):
+    # Harness conversation/turn/request IDs are opaque, unlike our record UUID.
+    if not isinstance(value, str) or not 0 < len(value) <= 200 or any(ord(c) < 32 for c in value):
+        raise ValueError('Invalid event identifier.')
+    return value
+
+
+def context():
+    token, nonce = os.environ.get('DOTFILES_AGENT_RECORD'), os.environ.get('DOTFILES_AGENT_NONCE')
+    pane = os.environ.get('TMUX_PANE')
+    if not token or not nonce or not pane:
+        return None
+    helpers = agent_helpers()
+    record = helpers['read_json'](helpers['record_path'](token))
+    if record.get('nonce') != nonce:
+        return None
+    fields = tmux('display-message', '-p', '-t', pane,
+                  '#{pid}\t#{pane_id}\t#{pane_pid}\t#{pane_dead}\t'
+                  '#{@dotfiles_agent_record}\t#{@dotfiles_attention_state}').split('\t')
+    if len(fields) != 6 or fields[1] != pane or fields[3] == '1' or fields[4] != token:
+        return None
+    runtime = record.get('runtime')
+    identity = {'record': token, 'nonce': nonce, 'server': fields[0],
+                'pane': pane, 'pane_pid': fields[2]}
+    if runtime != {key: identity[key] for key in ('server', 'pane', 'pane_pid')}:
+        return None  # Missing launch context, a different server, or a respawned pane.
+    try:
+        state = json.loads(fields[5]) if fields[5] else {}
+    except ValueError:
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    if state.get('identity') != identity:
+        state = {'version': 1, 'identity': identity, 'session': record.get('session_id'),
+                 'phase': 'unknown', 'turn': None, 'closed_turns': [],
+                 'requests': {}, 'notice': None}
+    return pane, record, state
+
+
+def attention_kind(state):
+    notice = state.get('notice')
+    if not notice:
+        return ''
+    # Seeing a pending request is different from answering it.
+    return notice['kind'] if notice['kind'] == 'input' or not notice['seen'] else ''
+
+
+def valid_state(state, row):
+    identity = state.get('identity', {})
+    if (row['pane_dead'] == '1' or identity.get('record') != row['@dotfiles_agent_record']
+            or identity.get('pane_pid') != row['pane_pid'] or identity.get('server') != row['pid']
+            or identity.get('pane') != row['pane_id']):
+        return False
+    try:
+        helpers = agent_helpers()
+        record = helpers['read_json'](helpers['record_path'](identity['record']))
+        return (identity.get('nonce') == record.get('nonce') and record.get('runtime') ==
+                {key: identity[key] for key in ('server', 'pane', 'pane_pid')})
+    except (OSError, ValueError, KeyError):
+        return False
+
+
+def publish(pane, state):
+    kind = attention_kind(state)
+    notice = state.get('notice') or {}
+    reason = notice.get('reason', '')
+    phase = state['phase']
+    caption = {'unknown': 'status unavailable', 'working': 'working',
+               'idle': 'response available', 'background': 'background work',
+               'failed': 'turn failed', 'interrupted': 'interrupted',
+               'exited': 'exited'}.get(phase, 'needs ' + reason)
+    values = {'state': json.dumps(state, separators=(',', ':'), ensure_ascii=True),
+              'phase': phase, 'kind': kind, 'reason': reason,
+              'pid': state['identity']['pane_pid'],
+              'notice': notice.get('id', ''), 'since': str(notice.get('since', 0)),
+              'caption': caption}
+    command = []
+    for key, value in values.items():
+        if command:
+            command.append(';')
+        command.extend(['set-option', '-p', '-t', pane, '@dotfiles_attention_' + key, value])
+    tmux(*command)
+    refresh()
+
+
+def refresh():
+    # One snapshot, deduplicated by pane: linked windows never inflate counts.
+    rows, seen, windows = panes(), set(), {}
+    counts = dict(input=0, ready=0, error=0)
+    clear = []
+    for row in rows:
+        pane, window = row['pane_id'], row['window_id']
+        windows.setdefault(window, set())
+        if pane in seen:
+            continue
+        seen.add(pane)
+        raw = row['@dotfiles_attention_state']
+        try:
+            state = json.loads(raw) if raw else {}
+            valid = isinstance(state, dict) and valid_state(state, row)
+        except (ValueError, TypeError):
+            valid = False
+        if not valid and raw:
+            for key in ('state', 'phase', 'kind', 'reason', 'notice', 'since', 'caption', 'pid'):
+                clear.extend(['set-option', '-pu', '-t', pane, '@dotfiles_attention_' + key, ';'])
+        kind = attention_kind(state) if valid else ''
+        if kind in counts:
+            counts[kind] += 1
+            windows[window].add(kind)
+    colors = dict(input='#e0af68', ready='#9ece6a', error='#f7768e')
+    summary = ' '.join('#[fg=' + colors[key] + ']' + str(counts[key]) + ' ' + key + '#[default]'
+                       for key in ('input', 'error', 'ready') if counts[key])
+    compact = ' '.join('#[fg=' + colors[key] + ']' + glyph + str(counts[key]) + '#[default]'
+                       for key, glyph in (('input', '!'), ('error', 'E'), ('ready', '+')) if counts[key])
+    command = clear
+    for window, kinds in windows.items():
+        key = next((key for key in ('input', 'error', 'ready') if key in kinds), None)
+        marker = '#[fg=' + colors[key] + ']' + ('+' if key == 'ready' else '!') + '#[default]' if key else ''
+        command.extend(['set-option', '-w', '-t', window, '@dotfiles_attention_mark', marker, ';'])
+    command.extend(['set-option', '-g', '@dotfiles_attention_summary', summary, ';',
+                    'set-option', '-g', '@dotfiles_attention_compact', compact])
+    for client in tmux('list-clients', '-F', '#{client_name}').splitlines():
+        command.extend([';', 'refresh-client', '-S', '-t', client])
+    tmux(*command)
+
+
+def reduce_event(state, event):
+    """Pure reducer: only normalized metadata enters this harness-agnostic layer."""
+    kind = event.get('event')
+    if event.get('version', 1) != 1 or kind not in EVENTS:
+        raise ValueError('Unsupported attention event/version.')
+    session = identifier(event.get('session_id'))
+    if kind != 'session_started' and state.get('session') != session:
+        return
+    if kind == 'session_started':
+        if state.get('session') != session or state['phase'] == 'unknown':
+            state.update(session=session, phase='unknown', turn=None, closed_turns=[], requests={}, notice=None)
+        return
+    turn = identifier(event['turn_id']) if event.get('turn_id') else None
+    if kind != 'turn_started' and turn and state['turn'] and turn != state['turn']:
+        return
+    if kind == 'turn_started':
+        if turn and turn in state['closed_turns']:
+            return
+        if turn and turn == state['turn']:
+            return
+        if state['turn'] and state['turn'] != turn:
+            state['closed_turns'] = (state['closed_turns'] + [state['turn']])[-32:]
+        state.update(turn=turn, phase='working', requests={}, notice=None)
+    elif kind == 'input_requested':
+        reason = event.get('reason')
+        if reason not in REASONS:
+            raise ValueError('Unsupported attention reason.')
+        request = identifier(event.get('request_id', reason))
+        if request in state['requests']:
+            return
+        if len(state['requests']) >= 16:
+            raise ValueError('Too many pending attention requests.')
+        tool = event.get('tool', '')
+        if not isinstance(tool, str):
+            raise ValueError('Invalid event tool name.')
+        if tool:
+            identifier(tool)
+        state['requests'][request] = {'reason': reason, 'tool': tool}
+        state['phase'] = 'waiting'
+        if not state.get('notice') or state['notice']['kind'] != 'input':
+            state['notice'] = {'id': str(uuid.uuid4()), 'kind': 'input', 'reason': reason,
+                               'since': time.time_ns() // 1000000, 'seen': False}
+    elif kind in ('input_resolved', 'progress'):
+        request = event.get('request_id')
+        if kind == 'input_resolved' and request not in state['requests']:
+            return
+        if request and request in state['requests']:
+            del state['requests'][request]
+        if state['requests']:
+            if state.get('notice'):
+                state['notice']['reason'] = next(iter(state['requests'].values()))['reason']
+            return
+        state['phase'] = 'working'
+        if state.get('notice') and state['notice']['kind'] == 'input':
+            state['notice'] = None
+        # A Stop hook can precede continuation. Withdraw its provisional response
+        # marker when the same turn advances; a prior turn's unread result survives.
+        elif state.get('notice') and state['notice'].get('provisional'):
+            state['notice'] = None
+    elif kind == 'turn_ended':
+        outcome = event.get('outcome', 'response')
+        if outcome not in ('response', 'failed', 'interrupted'):
+            raise ValueError('Unsupported turn outcome.')
+        if outcome == 'response' and state['requests']:
+            return  # A turn-end signal alone cannot prove pending input was answered.
+        if state['phase'] in ('idle', 'failed', 'interrupted', 'exited') or (state['phase'] == 'background' and event.get('background')):
+            return  # Repeated Stop/notification must not recreate unread attention.
+        state['requests'] = {}
+        state['phase'] = ('background' if event.get('background') else 'idle') if outcome == 'response' else outcome
+        state['notice'] = None
+        if outcome != 'interrupted' and not event.get('background'):
+            state['notice'] = {'id': str(uuid.uuid4()), 'kind': 'ready' if outcome == 'response' else 'error',
+                               'reason': '', 'since': time.time_ns() // 1000000, 'seen': False,
+                               'provisional': bool(event.get('provisional'))}
+    elif kind == 'session_ended':
+        state.update(phase='exited', requests={}, notice=None)
+
+
+def report(event, agent=None):
+    with server_lock():
+        selected = context()
+        if selected is None:
+            return
+        pane, record, state = selected
+        if agent and record.get('agent') != agent:
+            return
+        before = json.dumps(state, sort_keys=True)
+        reduce_event(state, event)
+        if before != json.dumps(state, sort_keys=True):
+            publish(pane, state)
+
+
+def native_event(agent, payload):
+    # Child completions/progress must not overwrite the human-facing parent pane.
+    # Child input cannot be routed without a verified owning-interface signal.
+    if payload.get('agent_id'):
+        return None
+    name, tool = payload.get('hook_event_name'), payload.get('tool_name', '')
+    if not isinstance(tool, str):
+        return None
+    event = {'version': 1, 'session_id': payload.get('session_id'), 'turn_id': payload.get('turn_id')}
+    question = {'AskUserQuestion': 'question', 'ExitPlanMode': 'plan',
+                'request_user_input': 'question',
+                'request_permissions': 'approval'}
+    # An asynchronous question tool can finish before the user answers. It needs
+    # a dedicated resolution signal; PostToolUse cannot provide that guarantee.
+    if name == 'SessionStart':
+        event['event'] = 'session_started'
+    elif name == 'UserPromptSubmit':
+        event['event'] = 'turn_started'
+    elif name == 'PermissionRequest':
+        event.update(event='input_requested', reason='approval', tool=tool,
+                     request_id='permission:' + tool)
+    elif name == 'PreToolUse' and tool.rsplit('.', 1)[-1] in question:
+        event.update(event='input_requested', reason=question[tool.rsplit('.', 1)[-1]], tool=tool,
+                     request_id=payload.get('tool_use_id') or 'tool:' + tool)
+    elif name in ('PostToolUse', 'PostToolUseFailure'):
+        event.update(event='progress', tool=tool, request_id=payload.get('tool_use_id') or 'tool:' + tool)
+        # PermissionRequest lacks a tool-use ID in both native schemas. Resolution
+        # is reported at tool completion, not immediately after the user approves.
+        event['permission_tool'] = tool
+    elif name == 'Notification' and agent == 'claude':
+        notification = payload.get('notification_type')
+        reason = {'permission_prompt': 'approval', 'elicitation_dialog': 'elicitation',
+                  'elicitation_url_dialog': 'elicitation'}.get(notification)
+        if not reason:
+            return None  # Auth, idle reminders, and teammate notices are different events.
+        event.update(event='input_requested', reason=reason, request_id='notification:' + reason)
+    elif name in ('Elicitation', 'ElicitationResult') and agent == 'claude':
+        event.update(event='input_requested' if name == 'Elicitation' else 'input_resolved',
+                     reason='elicitation', request_id=payload.get('elicitation_id') or
+                     'elicitation:' + str(payload.get('mcp_server_name', '')))
+    elif name == 'Stop':
+        event.update(event='turn_ended', outcome='response', provisional=True,
+                     background=bool(payload.get('background_tasks')))
+    elif name == 'StopFailure' and agent == 'claude':
+        event.update(event='turn_ended', outcome='failed')
+    elif name == 'Interrupt' and agent == 'codex':
+        event.update(event='turn_ended', outcome='interrupted')
+    elif name == 'SessionEnd':
+        event['event'] = 'session_ended'
+    else:
+        return None
+    return event
+
+
+def handle_hook(agent, payload):
+    if not os.environ.get('DOTFILES_AGENT_RECORD') or not os.environ.get('DOTFILES_AGENT_NONCE'):
+        return
+    event = native_event(agent, payload)
+    if event is None:
+        return
+    with server_lock():
+        selected = context()
+        if selected is None:
+            return
+        pane, record, state = selected
+        if record.get('agent') != agent or record.get('session_id') != event.get('session_id'):
+            return
+        if event.get('turn_id') and state['turn'] and event['event'] != 'turn_started' and event['turn_id'] != state['turn']:
+            return
+        before = json.dumps(state, sort_keys=True)
+        requests = state['requests']
+        if event['event'] == 'input_requested' and event['request_id'].startswith('notification:'):
+            if any(value['reason'] == event['reason'] for value in requests.values()):
+                return
+        if event['event'] == 'progress':
+            tool = event.get('permission_tool')
+            requests.pop('permission:' + tool, None)
+            # Delayed generic notifications cannot identify a tool/request. Keep
+            # them as last-reported input until main-agent progress is observed.
+            requests.pop('notification:approval', None)
+            if tool.rsplit('.', 1)[-1] in ('AskUserQuestion', 'request_user_input'):
+                requests.pop('notification:elicitation', None)
+        elif event['event'] == 'input_resolved':
+            if event['request_id'] not in requests and 'notification:elicitation' in requests:
+                event['request_id'] = 'notification:elicitation'
+        reduce_event(state, event)
+        if before != json.dumps(state, sort_keys=True):
+            publish(pane, state)
+
+
+def seen(pane, notice_id=None, client=None):
+    with server_lock():
+        fields = tmux('display-message', '-p', '-t', pane,
+                      '\t'.join('#{' + key + '}' for key in FIELDS)).split('\t')
+        row = dict(zip(FIELDS, fields))
+        raw = row['@dotfiles_attention_state']
+        state = json.loads(raw) if raw else {}
+        notice = state.get('notice')
+        if not notice or not valid_state(state, row):
+            return
+        if notice_id and notice['id'] != notice_id:
+            return
+        if client:
+            # Check this client's actual pane, not display-message's implicit context.
+            active = tmux('list-clients', '-F', '#{client_name}\t#{pane_id}').splitlines()
+            if client + '\t' + pane not in active:
+                return
+        if not notice['seen']:
+            notice['seen'] = True
+            publish(pane, state)
+
+
+def setup(dry_run, selected):
+    helpers = agent_helpers()
+    for agent, env_key, default, name in (('codex', 'CODEX_HOME', '.codex', 'hooks.json'),
+                                         ('claude', 'CLAUDE_CONFIG_DIR', '.claude', 'settings.json')):
+        if selected and selected != agent:
+            continue
+        home = Path(os.environ.get(env_key, str(Path.home() / default))).expanduser()
+        if not home.is_absolute():
+            raise ValueError(env_key + ' must be absolute.')
+        path = home / name
+        data = helpers['read_json'](path, limit=2 * 1024 * 1024) if path.exists() else {}
+        original = json.dumps(data, sort_keys=True)
+        hooks = data.setdefault('hooks', {})
+        if not isinstance(hooks, dict):
+            raise ValueError('Unexpected hooks configuration; merge it manually.')
+        events = ['UserPromptSubmit', 'PermissionRequest', 'PostToolUse', 'Stop', 'SessionEnd', 'PreToolUse']
+        events += ['Interrupt'] if agent == 'codex' else ['PostToolUseFailure', 'StopFailure', 'Notification', 'Elicitation', 'ElicitationResult']
+        capture = hooks.setdefault('SessionStart', [])
+        if not isinstance(capture, list):
+            raise ValueError('Unexpected SessionStart configuration.')
+        if helpers['hook_group'](agent) not in capture:
+            capture.append(helpers['hook_group'](agent))
+        command = 'python3 "$HOME/.local/bin/tmux-attention" hook ' + agent
+        for name_ in events:
+            groups = hooks.setdefault(name_, [])
+            if not isinstance(groups, list):
+                raise ValueError('Unexpected ' + name_ + ' configuration.')
+            # Replace our handlers only; preserve unrelated handlers, including
+            # another command in a group that also contains ours.
+            keep = []
+            for group in groups:
+                if not isinstance(group, dict) or not isinstance(group.get('hooks'), list):
+                    raise ValueError('Unexpected hook group; merge it manually.')
+                if not all(isinstance(handler, dict) for handler in group['hooks']):
+                    raise ValueError('Unexpected hook handler; merge it manually.')
+                other = [handler for handler in group['hooks'] if handler.get('command') != command]
+                if other or not group['hooks']:
+                    keep.append(dict(group, hooks=other))
+            group = {'hooks': [{'type': 'command', 'command': command, 'timeout': 1}]}
+            if name_ == 'PreToolUse':
+                group['matcher'] = ('(^|\\.)request_user_input$|(^|\\.)request_permissions$' if agent == 'codex'
+                                    else '^(AskUserQuestion|ExitPlanMode)$')
+            if name_ == 'Notification':
+                group['matcher'] = '^(permission_prompt|elicitation_dialog|elicitation_url_dialog)$'
+            hooks[name_] = keep + [group]
+        if original == json.dumps(data, sort_keys=True):
+            print(agent + ': attention hooks already present')
+            continue
+        print(agent + ': merge attention hooks and preserve other settings')
+        if dry_run:
+            continue
+        backup = helpers['state_root']().parent / 'backups' / ('attention-hooks-' + str(uuid.uuid4()))
+        helpers['private_directory'](backup)
+        existed = path.exists()
+        if existed:
+            (backup / path.name).write_bytes(path.read_bytes())
+            (backup / path.name).chmod(0o600)
+        helpers['write_json'](backup / 'manifest.json', {'target': str(path), 'existed': existed,
+                              'mode': path.stat().st_mode & 0o777 if existed else None})
+        helpers['write_json'](path, data)
+    if not dry_run and selected != 'claude':
+        print('Codex: review/trust the new commands with /hooks in a new CLI session.')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    commands.add_parser('hook').add_argument('agent', choices=('codex', 'claude'))
+    commands.add_parser('report', help='Read one normalized event JSON object from stdin')
+    commands.add_parser('refresh', help='Reconcile pane lifetimes and cached status on demand')
+    commands.add_parser('reset', help='Reset last-reported state when a managed invocation starts')
+    acknowledge = commands.add_parser('seen', help='Acknowledge an alert without resolving input')
+    acknowledge.add_argument('--pane', required=True)
+    acknowledge.add_argument('--notice')
+    acknowledge.add_argument('--client')
+    installation = commands.add_parser('setup')
+    installation.add_argument('--dry-run', action='store_true')
+    installation.add_argument('--agent', choices=('codex', 'claude'))
+    args = parser.parse_args()
+    if args.command in ('hook', 'report'):
+        if not os.environ.get('DOTFILES_AGENT_RECORD') or not os.environ.get('DOTFILES_AGENT_NONCE'):
+            return
+        payload = json.loads(sys.stdin.buffer.read(2 * 1024 * 1024 + 1))
+        if not isinstance(payload, dict):
+            raise ValueError('Expected an event object.')
+        handle_hook(args.agent, payload) if args.command == 'hook' else report(payload)
+    elif args.command == 'seen':
+        seen(args.pane, args.notice, args.client)
+    elif args.command == 'refresh':
+        with server_lock():
+            refresh()
+    elif args.command == 'reset':
+        with server_lock():
+            selected = context()
+            if selected:
+                pane, _, state = selected
+                state.update(phase='unknown', turn=None, closed_turns=[], requests={}, notice=None)
+                publish(pane, state)
+    elif args.command == 'setup':
+        setup(args.dry_run, args.agent)
+
+
+if __name__ == '__main__':
+    hook = sys.argv[1:2] == ['hook']
+    try:
+        main()
+    except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired) as error:
+        if not hook:
+            print('Agent attention: ' + str(error), file=sys.stderr)
+            sys.exit(1)
+    if hook:
+        # In particular, Codex Stop requires JSON stdout. Never emit model context
+        # or permission decisions, even if attention storage or tmux is unavailable.
+        print('{}')

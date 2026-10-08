@@ -26,6 +26,8 @@ PREFIX = (
     ('prefix', 'N', 'Workspace: launch an agent or scratch task', 'bind N run-shell -C "display-popup -EE -w 64 -h 13 -T \'Workspace\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} -e DOTFILES_TMUX_PANE=#{pane_id} \'exec \\"\\$HOME/.local/bin/tmux-workspace\\" --menu\'"'),
     ('prefix', 'b', 'Previous session', 'bind b switch-client -l'),
     ('prefix', 'g', 'Find existing tasks, agents and panes', 'bind g run-shell -C "display-popup -EE -w 90% -h 80% -T \'Tasks\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} \'exec \\"\\$HOME/.local/bin/tmux-tasks\\"\'"'),
+    ('prefix', 'a', 'Next agent needing attention', 'bind a run-shell \'DOTFILES_TMUX_CLIENT=#{q:client_name} DOTFILES_TMUX_SOCKET=#{q:socket_path} exec "$HOME/.local/bin/tmux-tasks" --next-attention\''),
+    ('prefix', 'A', 'Attention queue', 'bind A run-shell -C "display-popup -EE -w 90% -h 80% -T \'Attention\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} \'exec \\"\\$HOME/.local/bin/tmux-tasks\\" --attention\'"'),
     ('prefix', 'B', 'Previous task', 'bind B run-shell \'DOTFILES_TMUX_CLIENT=#{q:client_name} DOTFILES_TMUX_SOCKET=#{q:socket_path} exec "$HOME/.local/bin/tmux-tasks" --previous\''),
     ('prefix', 'r', 'Review current task; save private feedback', 'bind r run-shell -C "display-popup -EE -w 95% -h 90% -T \'Local review\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} -e DOTFILES_TMUX_PANE=#{pane_id} \'exec \\"\\$HOME/.local/bin/tmux-review\\"\'"'),
     ('prefix', 'z', 'Toggle pane zoom', 'bind z resize-pane -Z'),
@@ -42,6 +44,8 @@ TASK_ACTIONS = {
     "alt-h": ("hidden", "show hidden"),
     "ctrl-l": ("refresh", "refresh"),
     "alt-b": ("previous", "previous task"),
+    "alt-u": ("attention", "attention only"),
+    "alt-m": ("seen", "mark seen"),
 }
 FOLDER_ACTIONS = {
     "enter": ("choose", "choose"),
@@ -149,7 +153,9 @@ def cheatsheet():
         keys = []
         for command in commands:
             matches = [item for item in PREFIX if item[0] == table and command in item[3]
-                       and ("--previous" in item[3]) == previous]
+                       and ("--previous" in item[3]) == previous
+                       and ("--next-attention" in item[3]) == ("--next-attention" in command)
+                       and ("--attention" in item[3]) == ("--attention" in command)]
             if len(matches) != 1:
                 raise ValueError("Ambiguous cheatsheet binding: " + command)
             _, key, _, _ = matches[0]
@@ -187,6 +193,8 @@ def cheatsheet():
         ("Agents & tasks", [
             binding("Launch agent / scratch task", "tmux-workspace"),
             binding("Find tasks and agent panes", "tmux-tasks"),
+            binding("Next agent needing attention", "--next-attention"),
+            binding("Attention queue", "--attention"),
             binding("Review the current task", "tmux-review"),
         ]),
         ("Switch", [
@@ -248,7 +256,17 @@ def cheatsheet():
         "review": "Review selected task", "rename": "Rename pane",
         "hide": "Hide / unhide (keeps running)", "hidden": "Include hidden panes",
         "refresh": "Refresh results", "previous": "Previous task",
+        "attention": "Toggle attention only (includes hidden panes)",
+        "seen": "Mark alert seen (does not answer input)",
     }))
+    lines.append("")
+
+    heading("ATTENTION  |  Last state reported by native hooks",
+            "Input stays pending after a visit. Ready means a response is available, not that the task is complete.")
+    rows([("! / input", "Approval, question, plan or elicitation"),
+          ("+ / ready", "Unread response; task-picker visits mark it seen"),
+          ("E / error", "Turn failed; mark seen acknowledges it"),
+          ("Unavailable", "No verified event signal for this invocation")])
     lines.append("")
 
     heading("FOLDER PICKER  |  Workspace " + key_label(action_key(WORKSPACE_ACTIONS, "folder")),

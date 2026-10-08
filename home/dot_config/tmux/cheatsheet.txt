@@ -7,6 +7,8 @@ TMUX  |  Press Ctrl+A, then a key
   Agents & tasks
     N               Launch agent / scratch task
     g               Find tasks and agent panes
+    a               Next agent needing attention
+    A               Attention queue
     r               Review the current task
 
   Switch
@@ -59,6 +61,24 @@ TASK SWITCHER  |  Ctrl+A g
   Alt+h             Include hidden panes
   Ctrl+L            Refresh results
   Alt+b             Previous task
+  Alt+u             Toggle attention only (includes
+                    hidden panes)
+  Alt+m             Mark alert seen (does not answer
+                    input)
+
+ATTENTION  |  Last state reported by native hooks
+------------------------------------------------------
+  Input stays pending after a visit. Ready means a
+  response is available, not that the task is
+  complete.
+  ! / input         Approval, question, plan or
+                    elicitation
+  + / ready         Unread response; task-picker
+                    visits mark it seen
+  E / error         Turn failed; mark seen
+                    acknowledges it
+  Unavailable       No verified event signal for this
+                    invocation
 
 FOLDER PICKER  |  Workspace f
 ------------------------------------------------------

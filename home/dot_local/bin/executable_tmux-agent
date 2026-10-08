@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import shlex
 import shutil
 import subprocess
@@ -144,6 +145,14 @@ def capture(agent):
             return  # Ignore late hooks from a previous invocation.
         data['session_id'] = session_id
         write_json(path, data)
+    # Recovery and attention share the same captured identity; running separate
+    # SessionStart hooks concurrently would race the record update.
+    attention = Path(__file__).with_name('tmux-attention')
+    if attention.is_file():
+        try:
+            runpy.run_path(str(attention))['handle_hook'](agent, payload)
+        except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+            pass  # Attention is advisory; an exact-ID capture must still succeed.
 
 
 def set_pane_metadata(pane, data):
@@ -187,12 +196,25 @@ def run_agent(data, resume):
             if not resume and read_json(path).get('started'):
                 raise ValueError('This pane has already launched. Use a saved recovery snapshot.')
             data['started'], data['nonce'] = True, str(uuid.uuid4())
+            if pane:
+                runtime = tmux('display-message', '-p', '-t', pane,
+                               '#{pid}\t#{pane_id}\t#{pane_pid}').split('\t')
+                if len(runtime) != 3 or runtime[1] != pane:
+                    raise ValueError('The launch pane is no longer available.')
+                data['runtime'] = dict(zip(('server', 'pane', 'pane_pid'), runtime))
             write_json(path, data)
         env = os.environ.copy()
         # Popup/source targeting must not leak into the new pane's runtime.
         for key in ('DOTFILES_TMUX_SOCKET', 'DOTFILES_TMUX_CLIENT', 'DOTFILES_TMUX_PANE'):
             env.pop(key, None)
         env['DOTFILES_AGENT_RECORD'], env['DOTFILES_AGENT_NONCE'] = token, data['nonce']
+        attention = Path(__file__).with_name('tmux-attention')
+        if pane and attention.is_file():
+            try:
+                subprocess.run([sys.executable, str(attention), 'reset'], env=env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
         env_key = 'CODEX_HOME' if agent == 'codex' else 'CLAUDE_CONFIG_DIR'
         home = data.get('agent_home')
         if not isinstance(home, str) or not Path(home).is_absolute():

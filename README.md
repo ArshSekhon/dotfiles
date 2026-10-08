@@ -172,7 +172,24 @@ Ctrl+A, g searches sessions, windows, pane labels, tools, and folders. Enter jum
 Alt+s opens a shell in the selected folder, and Ctrl+R opens its local review.
 Ctrl+A, Shift+B returns to the previous task. Workspace (Ctrl+A, Shift+N) also has
 a g shortcut. See [AGENTS.md](AGENTS.md) for labels, hiding, and picker controls.
-The picker reads tmux metadata on demand; automatic attention detection is future work.
+The picker reads tmux metadata on demand. Managed Codex/Claude invocations report
+attention through native hooks into a shared event reducer; there is no watcher,
+daemon, transcript inspection or idle polling. See [bootstrap setup and signal
+limits](BOOTSTRAP.md#agent-attention-setup-and-event-contract).
+
+Ctrl+A, **a** jumps to the next agent needing attention; Ctrl+A, **Shift+A** opens
+the attention queue. It includes hidden panes, prioritizes pending input, then
+errors, then unread responses, and counts linked windows only once. In the task
+picker, **Alt+u** toggles attention only; **Alt+m** marks the selected alert seen.
+The bottom status line shows input/error/ready counts (compact `!`/`E`/`+` on narrow
+terminals); window markers and named-pane captions show the reported state.
+
+Visiting through these pickers acknowledges a response/error. Pending input stays
+pending until its adapter reports resolution; a visit or mark-seen never answers it.
+Ordinary pane movement does not acknowledge alerts. Ready means a response was
+reported, and can precede continuation; it does not mean the task is complete.
+Existing live panes stay untouched and show unavailable status until a new managed
+invocation. For Codex, review/trust the new commands with `/hooks` in a new session.
 
 ### SSH clipboard
 

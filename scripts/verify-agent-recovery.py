@@ -35,6 +35,7 @@ def main():
         helper = tools / 'tmux-agent'
         shutil.copyfile(repo / 'home/dot_local/bin/executable_tmux-agent', helper)
         helper.chmod(0o700)
+        shutil.copyfile(repo / 'home/dot_local/bin/executable_tmux-attention', tools / 'tmux-attention')
         project = root / 'shared project'
         project.mkdir()
         traces = root / 'traces'
