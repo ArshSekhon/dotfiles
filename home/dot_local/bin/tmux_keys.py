@@ -27,6 +27,7 @@ PREFIX = (
             + '"swap-pane -d -s #{pane_id} -t \\"{' + direction + '-of}\\""\'')
            for arrow, direction, edge in (('Left', 'left', 'left'), ('Down', 'down', 'bottom'),
                                            ('Up', 'up', 'top'), ('Right', 'right', 'right'))),
+    ('prefix', 'p', 'Previous pane; keep zoom', 'bind p last-pane -Z'),
     ('prefix', 'Tab', 'Previous window', 'bind Tab last-window'),
     ('prefix', 's', 'Session picker: letter shortcuts and custom order', 'bind s run-shell -C "display-popup -EE -w 80% -h 75% -T \'Sessions\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} \'exec \\"\\$HOME/.local/bin/tmux-sessions\\"\'"'),
     ('prefix', 'w', 'Window picker', 'bind w choose-tree -Zw'),
@@ -231,6 +232,7 @@ def cheatsheet():
             binding("Previous task", "tmux-tasks", previous=True),
             binding("Previous session", "switch-client -l"),
             binding("Previous window", "last-window"),
+            binding("Previous pane (keeps zoom)", "last-pane -Z"),
             binding("Session / window picker", "tmux-sessions", "choose-tree -Zw"),
         ]),
         ("Windows & panes", [

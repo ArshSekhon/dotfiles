@@ -215,6 +215,10 @@ def main():
             assert run("display-message", "-p", "#{pane_current_path}") == str(checkout)
             press(b"\x01\t")
             assert run("display-message", "-p", "#{window_index}") == "1"
+            press(b"\x01\t")
+            assert run("display-message", "-p", "#{window_index}") == "2"
+            press(b"\x01\t")
+            assert run("display-message", "-p", "#{window_index}") == "1"
             run("kill-window", "-t", "baseline:1")
             assert run("display-message", "-p", "#{window_index}") == "1"
 

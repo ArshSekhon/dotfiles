@@ -251,7 +251,8 @@ confirmation is pending. No new dependency, watcher, or tmux restart is needed.
 | c / \| / - | New window / horizontal split / vertical split |
 | h/j/k/l / H/J/K/L | Move / resize panes |
 | Shift+Arrow | Swap active pane with neighbor; keep its focus |
-| z / Tab | Zoom / previous window |
+| z | Toggle pane zoom |
+| p / Tab | Previous pane (keeps zoom) / previous window; repeat to return |
 | s / w | Session / window picker |
 | N (Shift+N) / b | Workspace launcher / return to the previous session |
 | g / B (Shift+B) | Search existing tasks/panes / return to the previous task |
@@ -276,6 +277,9 @@ picker, without changing native IDs or other pickers.
 Ctrl+A, Shift+Arrow swaps panes inside the current window, preserving focus,
 IDs/processes/labels/attention. It reveals zoom first and stops at outer edges.
 No process is launched for swaps; the picker blocks on input without polling.
+Ctrl+A, b/Tab/p toggles the last session/window/pane; repeat the same key to
+return. Pane toggling stays inside its window and preserves zoom. Ctrl+A, Shift+B
+keeps the separate previous-task history from task-picker visits.
 Ubuntu/tmux 3.4 pilot, 2026-10-08: current-source session/pane and baseline checks
 passed with isolated two-client PTYs at 120/70 columns, including concurrent
 preferences, stale/malformed state, marked-pane routing, focus and metadata.

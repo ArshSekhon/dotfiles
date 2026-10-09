@@ -15,6 +15,7 @@ TMUX  |  Press Ctrl+A, then a key
     B               Previous task
     b               Previous session
     Tab             Previous window
+    p               Previous pane (keeps zoom)
     s / w           Session / window picker
 
   Windows & panes

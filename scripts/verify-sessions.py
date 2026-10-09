@@ -228,6 +228,10 @@ def main():
                 dev_id = next(row["id"] for row in helper["session_rows"](run) if row["name"] == "dev")
                 wait_for(lambda: context(actor)[0] == dev_id)
                 assert context(observer) == observer_before
+                for previous_session in (source_id, dev_id):
+                    press(b"\x01b")
+                    wait_for(lambda: context(actor)[0] == previous_session)
+                    assert context(observer) == observer_before
                 open_picker()
                 press(b"X")
                 wait_for(lambda: context(actor) == (source_id, source_pane))
@@ -300,8 +304,22 @@ def main():
             run("set-option", "-p", "-t", source_pane, "@dotfiles_attention_notice", "kept-notice")
             run("set-option", "-p", "-t", source_pane, "@dotfiles_agent_record", "kept-record")
             run("select-pane", "-m", "-t", "=observer:")
+            run("select-pane", "-t", right)
             run("select-pane", "-t", source_pane)
             pane_snapshot = snapshot()
+
+            # Last-pane toggles both ways in the invoking window, even with a
+            # globally marked pane elsewhere. Preserve zoom and pane metadata.
+            for zoomed in (False, True):
+                if zoomed:
+                    run("resize-pane", "-Z", "-t", source_pane)
+                for expected in (right, source_pane):
+                    press(b"\x01p")
+                    wait_for(lambda: context(actor)[1] == expected)
+                    assert context(observer) == observer_before and snapshot() == pane_snapshot
+                    assert run("display-message", "-p", "-t", expected, "#{window_zoomed_flag}") == str(int(zoomed))
+                if zoomed:
+                    run("resize-pane", "-Z", "-t", source_pane)
 
             def position():
                 return run("display-message", "-p", "-t", source_pane, "#{pane_left}:#{pane_top}")
@@ -327,7 +345,7 @@ def main():
             print("Passed: stable/private keys, assignment/clear/cancel, concurrent writes, malformed state,")
             print("reserved-key migration, e editing, J/K and Shift-arrow ordering, reopened names, letter jumps,")
             print("two-client routing, 120/70-column UI,")
-            print("pane swaps/focus/edges/zoom/marked-pane safety and preserved processes/metadata.")
+            print("pane back-and-forth/zoom, swaps/focus/edges/marked-pane safety and preserved processes/metadata.")
             print("First inventory {:.1f} ms; popup {:.1f}/{:.1f} ms; one-second idle CPU {:.1f}%.".format(
                   first_ms, popup_ms, narrow_ms, idle_cpu))
         finally:

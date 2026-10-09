@@ -227,6 +227,11 @@ pane reveals its layout before moving. h/j/k/l selects panes and H/J/K/L resizes
 them. Pane labels, agent IDs and attention stay with the pane. These keys move
 panes within the current window; they do not move them between sessions.
 
+For quick back-and-forth, **Ctrl+A, b** returns to the last session,
+**Ctrl+A, Tab** to the last window, and **Ctrl+A, p** to the last pane in the
+current window (keeping zoom). Press the same shortcut again to return.
+**Ctrl+A, Shift+B** toggles the last two task panes visited through the task switcher.
+
 Ctrl+A, g searches sessions, windows, pane labels, tools, and folders. Enter jumps;
 Alt+s opens a shell in the selected folder, and Ctrl+R opens its local review.
 Ctrl+A, Shift+B returns to the previous task. Workspace (Ctrl+A, Shift+N) also has
