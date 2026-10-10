@@ -255,6 +255,34 @@ reported, and can precede continuation; it does not mean the task is complete.
 Existing live panes stay untouched and show unavailable status until a new managed
 invocation. For Codex, review/trust the new commands with `/hooks` in a new session.
 
+### Nested tmux
+
+Use **Ctrl+A for outer tmux** and **Ctrl+B for a separate inner/remote server**.
+On the inner host, apply the managed `~/.config/tmux/inner.conf` profile and add
+this line at the end of its private `~/.tmux.local.conf`:
+
+```tmux
+source-file ~/.config/tmux/inner.conf
+```
+
+Run `tmux source-file ~/.config/tmux/inner.conf` there to activate it immediately,
+without restarting sessions or reloading plugins. Ctrl+A, s opens outer sessions;
+Ctrl+B, s opens inner sessions. All documented Ctrl+A shortcuts use Ctrl+B on
+that inner server, and Ctrl+B twice sends a literal Ctrl+B to its application.
+The choice is explicit per server, including when connected directly; SSH does
+not change it automatically. See [setup and restoration](BOOTSTRAP.md#nested-tmux-checks).
+
+Enable `mouse on` in both layers. Native tmux wheel bindings forward events when
+the inner tmux requests mouse input; an inner layer with mouse disabled can make
+the outer layer enter copy mode instead. Check the effective settings and custom
+bindings with the [nested-session diagnostic recipe](BOOTSTRAP.md#nested-tmux-checks).
+
+If both layers still use Ctrl+A, press **Ctrl+A, Ctrl+A, then the key** to control the
+inner layer: for example, Ctrl+A, Ctrl+A, [ opens its copy mode, and Ctrl+A,
+Ctrl+A, d detaches the inner client. Ctrl+A, [ still opens the outer copy mode.
+For longer remote work, a dedicated terminal tab connected directly to the remote
+tmux keeps one layer of shortcuts and scrollback.
+
 ### SSH clipboard
 
 Copy text to the connected device: **Ctrl+A, [** enters copy mode, **v** starts

@@ -20,7 +20,8 @@ def main():
     if any(line.startswith(('bind ', 'bind-key ')) for line in (before + tail).splitlines()):
         raise ValueError('Put shared bindings in tmux_keys.py, not outside the generated block')
     targets = {config: before + marker + keys['native_bindings']() + end + tail,
-               root / 'home/dot_config/tmux/cheatsheet.txt': keys['cheatsheet']()}
+               root / 'home/dot_config/tmux/cheatsheet.txt': keys['cheatsheet'](),
+               root / 'home/dot_config/tmux/inner.conf': keys['inner_config']()}
     stale = [path for path, expected in targets.items() if not path.exists() or path.read_text() != expected]
     if args.check:
         if stale:

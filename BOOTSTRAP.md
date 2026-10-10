@@ -168,6 +168,72 @@ The private manifest records original files/modes (or new targets) and the five
 prior bindings. Restore those files and bindings, unbinding keys previously absent;
 retain intervening private changes. No full reload or session restart is required.
 
+## Nested tmux checks
+
+Keep the shared Ctrl+A default on the outer server. For a separate inner server,
+preview/apply the profile, help and catalog together:
+
+```sh
+chezmoi --source="$PWD" --no-pager diff ~/.config/tmux/inner.conf ~/.config/tmux/cheatsheet.txt ~/.local/bin/tmux_keys.py
+chezmoi --source="$PWD" apply --dry-run --parent-dirs ~/.config/tmux/inner.conf ~/.config/tmux/cheatsheet.txt ~/.local/bin/tmux_keys.py
+chezmoi --source="$PWD" apply --parent-dirs ~/.config/tmux/inner.conf ~/.config/tmux/cheatsheet.txt ~/.local/bin/tmux_keys.py
+```
+
+The profile is generated from
+the shortcut catalog; `sync-tmux-keys.py --check` checks it too. Back up any
+conflicting targets and the existing private `~/.tmux.local.conf`, then add
+`source-file ~/.config/tmux/inner.conf` at the end of that override. Source only
+the profile for live activation, avoiding a full plugin reload:
+
+```sh
+tmux source-file ~/.config/tmux/inner.conf
+tmux show-options -Av prefix
+```
+
+The expected prefix is `C-b`. This sets the server's global session default and
+changes its prefix-table Ctrl+A/Ctrl+B bindings; other clients on that server
+share those bindings. Existing session-local prefix overrides retain their own
+values. Use a separate `tmux -L inner` server for two roles on the same machine;
+load the inner profile only into that server rather than persisting it for both.
+Do not infer the role from SSH or change the outer server while configuring it.
+
+For restoration, remove the added source line (preserving other private edits),
+restore the previous prefix option and Ctrl+A/Ctrl+B bindings. For the shared
+baseline these are `set -g prefix C-a`, `unbind -q C-b`, and `bind C-a send-prefix`.
+No session restart is needed. Preserve any pre-existing session overrides.
+
+From a shell in each layer, record the terminal app, tmux version, effective mouse
+setting and wheel bindings before changing configuration:
+
+```sh
+tmux -V
+tmux show-options -Av mouse
+tmux list-keys -T root | rg 'WheelUpPane|WheelDownPane'
+printf 'TERM=%s\n' "$TERM"
+```
+
+Use `tmux set-option mouse on` in a layer whose effective setting is off; this
+changes that session, so account for other clients sharing it. Persist the setting
+in the appropriate managed configuration/private override. Native wheel bindings
+use `send-keys -M` when the application requests mouse input. Compare custom wheel
+bindings before replacing them. Keep a tmux/screen terminfo entry inside tmux and
+ensure the remote host has the client terminal's entry; do not force xterm in shell
+startup files. See the [tmux mouse manual](https://man.openbsd.org/tmux.1#MOUSE_SUPPORT)
+and [terminal guidance](https://github.com/tmux/tmux/wiki/FAQ#what-is-term-and-what-does-it-do).
+
+With the inner profile, Ctrl+B addresses the inner server directly. If both
+layers use Ctrl+A, Ctrl+A Ctrl+A sends one prefix to the inner client;
+the next key controls that layer. Blanket nesting toggles that change global/session
+prefix, mouse or key-table options also affect other clients of that session.
+Verify scope and restoration before adopting such a toggle. Ubuntu/tmux 3.4 isolated
+nested PTYs passed inner wheel scrolling and double-prefix copy mode; disabling
+inner mouse reproduced outer copy-mode capture. Current-source inner-profile checks
+also passed separate Ctrl+A/Ctrl+B dispatch, literal Ctrl+B delivery, repeat loading,
+full baseline reload with the private source line, pane/PID preservation and scoped
+chezmoi preview/dry-run/rerun/conflict restoration. Profile loading took ~2.5 ms
+including the tmux command process; it adds no startup subprocess or idle work.
+Work-machine terminals remain unverified.
+
 ## Agent recovery setup
 
 Apply the tmux configuration and all seven helpers plus `tmux_keys.py` together. Install tmux-resurrect

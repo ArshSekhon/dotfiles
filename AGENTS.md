@@ -105,6 +105,9 @@ in BOOTSTRAP.md and machine-specific records outside Git.
   failure modes. Avoid maintaining tests of upstream tools and plugins.
 - Scoped chezmoi directory previews need `diff --recursive`; first application
   needs `--parent-dirs` when ancestors are missing. Verify nested files explicitly.
+- Diagnose nested tmux mouse input in both layers before overriding wheel bindings.
+  Native forwarding works when the inner application requests mouse; global/session
+  nesting toggles can also change input for other attached clients.
 - Preserve whether agent configuration overrides were unset. Exporting
   `CLAUDE_CONFIG_DIR=~/.claude` changes the `.claude.json` lookup despite appearing
   to name its default; freeze explicit choices in recovery snapshots.
@@ -240,6 +243,14 @@ IDs privately; tmux-resurrect restores layouts and invokes exact-ID recovery.
 The pilot keeps its pre-existing resurrect/continuum plugins in ~/.tmux.local.conf,
 an unmanaged private override loaded beside ~/.tmux.conf. Its compatibility plugin
 list supports the existing TPM version. Keep continuum loaded after status styling.
+For a separate inner server, the generated ~/.config/tmux/inner.conf profile opts
+into Ctrl+B via that server's private override; Ctrl+A remains the shared default.
+Help explains the prefix substitution. Role selection is explicit, never inferred
+from SSH. Apply the profile, catalog and help together; see BOOTSTRAP.md for scope
+and restoration. No watcher, polling or dependency is added.
+Ubuntu/tmux 3.4 nested PTYs passed prefix/wheel routing, literal Ctrl+B, reloads
+and scoped chezmoi restoration. The profile/help are installed; this pilot stays
+on Ctrl+A. Work-machine activation and physical terminals remain unverified.
 
 SSH clients: Ghostty on macOS and RootShell on iPad. Use native OSC 52; the pilot's
 attached xterm-256color clients advertise `Ms` and `set-clipboard` is already on.

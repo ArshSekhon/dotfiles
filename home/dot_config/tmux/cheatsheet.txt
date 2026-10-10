@@ -1,6 +1,8 @@
 TMUX SHORTCUTS
 j/k scroll   / search   q close
 Single uppercase keys use Shift: N = Shift+n.
+Default: Ctrl+A. With inner.conf, use Ctrl+B below.
+Press the active prefix twice to send it through.
 
 TMUX  |  Press Ctrl+A, then a key
 ------------------------------------------------------

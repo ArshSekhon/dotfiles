@@ -44,6 +44,19 @@ PREFIX = (
     ('prefix', '[', 'Enter copy mode', 'bind [ copy-mode'),
 )
 
+# Explicit per-server choice, sourced from the inner host's private override.
+# Keep the default on Ctrl+A; SSH alone does not establish a nesting layer.
+INNER_PREFIX = ('prefix', 'C-b', 'Send Ctrl+B to the application', 'bind C-b send-prefix')
+
+
+def inner_config():
+    """Native opt-in profile; regenerate with sync-tmux-keys.py."""
+    return ("# Generated from tmux_keys.py; do not edit directly.\n"
+            "# Source last from ~/.tmux.local.conf on a separate inner server.\n"
+            "# Global defaults affect sessions inheriting prefix; bindings are server-wide.\n"
+            "set -g prefix " + INNER_PREFIX[1] + "\n"
+            "unbind -q C-a\n" + INNER_PREFIX[3] + "\n")
+
 # Key -> (action token, label). Tokens are independent of chosen keys.
 TASK_ACTIONS = {
     "enter": ("jump", "jump"),
@@ -205,7 +218,9 @@ def cheatsheet():
         return "/".join(key for key, action in NAME_KEYS.items() if action in tokens)
 
     lines = ["TMUX SHORTCUTS", "j/k scroll   / search   q close",
-             "Single uppercase keys use Shift: N = Shift+n.", ""]
+             "Single uppercase keys use Shift: N = Shift+n.",
+             "Default: Ctrl+A. With inner.conf, use Ctrl+B below.",
+             "Press the active prefix twice to send it through.", ""]
 
     def heading(title, note=None):
         lines.extend([title, "-" * 54])
