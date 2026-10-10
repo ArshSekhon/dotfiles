@@ -187,6 +187,11 @@ require the user to review/trust the hook through
 may need explicit binding or a subsequent session after trust. Codex 0.160.1 creates
 its initial thread/hook on first submission; an unused pane may have no ID yet.
 Managed sessions retain their normal CLI model, permission, and authentication settings.
+Keep an unset `CLAUDE_CONFIG_DIR` unset: explicitly exporting `~/.claude` also moves
+Claude's global `.claude.json` lookup into that directory. New records distinguish
+unset from explicitly selected paths. Older snapshots retain custom directories;
+their default `~/.claude` path is treated as unset because the original choice was
+not recorded. See [Claude configuration locations](https://code.claude.com/docs/en/claude-directory).
 
 `tmux-agent status` lists live managed panes and capture readiness. Existing unmanaged
 conversations can be registered explicitly with
@@ -211,6 +216,20 @@ private server restart, real plugin restore, duplicate/missing-state failures,
 manual adoption, private settings merging/backups, and repeatability. Use
 `python3 scripts/verify-tmux.py` for launcher/picker checks. No real conversations
 or reboot are exercised by these scripts; verify an actual recovery deliberately.
+
+For a real recovery drill, first check `codex login status` and `claude auth status`;
+complete authentication in the ordinary CLI. Use disposable conversations, a private
+tmux socket, separate helper state and resurrect layouts, and explicit test folders.
+Do not source the live private override/continuum loader into that test server.
+Give two conversations in the same folder different markers, save only after their
+exact IDs are ready, restart only the test server, and restore through resurrect.
+Compare each CLI's native session ID with its saved UUID and ask it to recall its
+marker without repeating the marker or allowing file/tool access. Restore again
+and confirm existing pane PIDs stay unchanged. Never read unrelated histories.
+Leave hook review to the user; explicit UUID binding can verify recovery separately.
+Codex may show update/hook review prompts. If it reports incompatible shared daemon
+settings, choose its per-invocation **Run without daemon** option rather than
+restarting a daemon used by active sessions. Record tool versions on both sides.
 
 ## Agent status-line setup
 

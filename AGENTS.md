@@ -105,6 +105,9 @@ in BOOTSTRAP.md and machine-specific records outside Git.
   failure modes. Avoid maintaining tests of upstream tools and plugins.
 - Scoped chezmoi directory previews need `diff --recursive`; first application
   needs `--parent-dirs` when ancestors are missing. Verify nested files explicitly.
+- Preserve whether agent configuration overrides were unset. Exporting
+  `CLAUDE_CONFIG_DIR=~/.claude` changes the `.claude.json` lookup despite appearing
+  to name its default; freeze explicit choices in recovery snapshots.
 - Agent attention needs a shared event contract with per-harness adapters and
   explicit signal coverage. Turn-end hooks can precede continuation or background
   work; they do not prove task completion. Separate alert acknowledgement from
@@ -399,11 +402,25 @@ one folder: private server restart resumed both exact IDs/names/folders; repeate
 restore kept running panes. Missing state/tools/folders/IDs, duplicate starts,
 manual binding, additive settings/backups, and private modes passed. Installed Codex
 0.160.1 and Claude 2.1.246 supplied native hook IDs/environment in disposable offline
-fixtures using an unreachable localhost provider. Actual conversation recovery,
+fixtures using an unreachable localhost provider. Claude conversation recovery,
 physical reboot, macOS, and Amazon Linux remain unverified.
 Two synthetic launches took ~173–263 ms total, plugin save ~158–186 ms, restore ~441–468 ms.
 These include the helper and installed plugin, exclude real agent/model work, and
 are initial Ubuntu checks. The helper execs the CLI, leaving no Python supervisor per pane.
+
+Ubuntu real recovery pilot, 2026-10-09: two disposable Codex conversations sharing
+one folder restored their exact native UUIDs and recalled distinct markers after
+private-server restart and real resurrect restore. Repeating restore preserved
+their pane PIDs. Initial conversations used Codex 0.160.1; restored conversations
+used the observed 0.162.1 installation. Current-worktree helper checks used explicit
+UUID bindings because native hooks still require user trust. Claude had no signed-in
+account; its real recovery was deferred at the user's request. The drill exposed and
+fixed unintended CLAUDE_CONFIG_DIR export; fresh/resumed unset, explicit-default,
+custom and legacy cases pass isolated regressions. Private evidence stays outside Git.
+Scoped chezmoi preview/dry-run, rerun and conflict restoration passed; the helper
+fix is applied with a private backup. All nine live pane PIDs/layouts and both
+attached clients were preserved. Recovery and attention regression checks passed.
+Automatic trusted-hook capture, physical reboot and other platforms remain pending.
 
 The pilot has checksum-verified fzf 0.74.4 installed; other platforms remain unverified.
 Task-switcher checks use a private server and real fzf with synthetic commands;
@@ -510,8 +527,9 @@ These are observed versions, not installation targets; tmux is now applied as ab
    Scratch organization, one Vim-style launcher with remembered agent selection,
    named-pane captions, the folder picker, and task/agent navigation are implemented.
    Exact-ID recovery is implemented and tested on an isolated server; native hook
-   capture passed offline checks. **Next:** real conversation recovery verification,
-   then real attention signal/user-terminal checks and task worktrees. Native attention
+   capture passed offline checks; real Codex recovery passed with explicit UUIDs.
+   **Next:** user hook trust/Claude authentication for the remaining recovery checks,
+   real attention signal/user-terminal checks and task worktrees. Native attention
    adapters, local review/feedback and generated
    shortcut help are implemented; actual user-terminal checks remain.
    Use the home/ chezmoi source and add stable tool setup needed for this milestone.

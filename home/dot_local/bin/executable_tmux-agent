@@ -118,6 +118,7 @@ def register(pane, agent, session_id=None, directory=None):
         raise ValueError(env_key + ' must be absolute.')
     data = {'version': 1, 'token': token, 'agent': agent, 'session_id': session_id,
             'cwd': directory, 'label': label, 'agent_home': str(home), 'started': False,
+            'agent_home_explicit': env_key in os.environ,
             'nonce': None, 'manual': session_id is not None}
     write_json(record_path(token), data)
     tmux('set-option', '-p', '-t', pane, '@dotfiles_agent_record', token)
@@ -219,7 +220,16 @@ def run_agent(data, resume):
         home = data.get('agent_home')
         if not isinstance(home, str) or not Path(home).is_absolute():
             raise ValueError('The saved agent configuration directory is invalid.')
-        env[env_key] = home
+        # Claude keeps ~/.claude.json outside ~/.claude when this variable is unset.
+        # Exporting its apparent default changes that lookup; preserve the choice.
+        # Older snapshots did not record it: retain custom paths, infer unset only
+        # for the default. Explicit default overrides are preserved in new records.
+        explicit = data.get('agent_home_explicit')
+        if agent == 'claude' and (explicit is False or
+                                 (explicit is None and home == str(Path.home() / '.claude'))):
+            env.pop(env_key, None)
+        else:
+            env[env_key] = home
         command = [executable]
         if resume:
             command += ['resume', session_id] if agent == 'codex' else ['--resume', session_id]
@@ -262,7 +272,8 @@ def save_layout(filename):
                 data = {'version': 1, 'token': token, 'agent': 'codex', 'session_id': None,
                         'agent_home': str(Path.home() / '.codex')}
             data = {name: data.get(name) for name in
-                    ('version', 'token', 'agent', 'session_id', 'agent_home', 'cwd')}
+                    ('version', 'token', 'agent', 'session_id', 'agent_home',
+                     'agent_home_explicit', 'cwd')}
             data.update(cwd=current or data.get('cwd', ''), label=label)
             digest = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
             saved = snapshot_path(digest)

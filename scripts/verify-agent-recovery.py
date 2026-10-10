@@ -2,6 +2,7 @@
 """Verify our capture/restore integration with real tmux-resurrect and fake agents."""
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -61,7 +62,7 @@ payload = {'hook_event_name': 'SessionStart', 'session_id': session, 'cwd': os.g
 helper = Path.home() / '.local/bin/tmux-agent'
 subprocess.run([sys.executable, str(helper), 'capture', name], input=json.dumps(payload), text=True, check=True)
 trace = Path(os.environ['DOTFILES_TEST_TRACES']) / (str(os.getpid()) + '.json')
-trace.write_text(json.dumps({'agent': name, 'id': session, 'args': sys.argv[1:], 'cwd': os.getcwd(), 'token': os.environ['DOTFILES_AGENT_RECORD']}))
+trace.write_text(json.dumps({'agent': name, 'id': session, 'args': sys.argv[1:], 'cwd': os.getcwd(), 'token': os.environ['DOTFILES_AGENT_RECORD'], 'config_home': os.environ.get('CLAUDE_CONFIG_DIR')}))
 time.sleep(120)
 '''
         for tool in ('codex', 'claude'):
@@ -140,6 +141,7 @@ time.sleep(120)
             wait(lambda: len(list(traces.glob('*.json'))) == 2)
             launch_ms = round((time.monotonic() - started) * 1000, 1)
             originals = [json.loads(p.read_text()) for p in traces.glob('*.json')]
+            assert all(x['config_home'] is None for x in originals if x['agent'] == 'claude')
             # The pane PID is the CLI itself, with no resident Python supervisor.
             for pane, token, _, _ in created:
                 trace = next(p for p in traces.glob('*.json') if json.loads(p.read_text())['token'] == token)
@@ -165,6 +167,7 @@ time.sleep(120)
             assert 'sleep' in saved  # Unmanaged pane remains unchanged.
             snapshots = list((state / 'snapshots').glob('*.json'))
             assert len(snapshots) == 2
+            assert all(json.loads(p.read_text())['agent_home_explicit'] is False for p in snapshots)
             for snapshot in snapshots:
                 duplicate = call('resume', snapshot.stem, check=False)
                 assert duplicate.returncode != 0 and 'already running' in duplicate.stderr
@@ -193,6 +196,7 @@ time.sleep(120)
             assert {(x['agent'], x['id']) for x in resumed} == {(x['agent'], x['id']) for x in originals}
             assert all(x['args'] == (['resume', x['id']] if x['agent'] == 'codex' else ['--resume', x['id']]) for x in resumed)
             assert all(x['cwd'] == str(project) for x in resumed)
+            assert all(x['config_home'] is None for x in resumed if x['agent'] == 'claude')
             assert keeper in run('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}')
             for _, token, _, label in created:
                 assert label in run('list-panes', '-a', '-F', '#{@dotfiles_pane_name}')
@@ -234,11 +238,48 @@ time.sleep(120)
             assert run('display-message', '-p', '-t', pane, '#{pane_pid}') == pid
             assert 'manual binding' in call('status').stdout
             call('bind', 'codex', str(uuid.uuid4()), '--pane', pane)
+            # Our launcher must preserve Claude's distinction between an unset
+            # override and an explicitly selected directory, including ~/.claude.
+            default_home, custom_home = str(home / '.claude'), str(home / 'custom Claude')
+            cases = [(override, False, resume) for override in (None, default_home, custom_home)
+                     for resume in (False, True)]
+            cases += [(None, True, True), (custom_home, True, True)]
+            for override, legacy, resume in cases:
+                pane = run('new-window', '-d', '-t', '=keeper:', '-c', str(project),
+                           '-P', '-F', '#{pane_id}', '/bin/sleep 120')
+                registration_env = dict(env)
+                if override is not None:
+                    registration_env['CLAUDE_CONFIG_DIR'] = override
+                with patch.dict(os.environ, registration_env, clear=True):
+                    token = module['register'](pane, 'claude')
+                    data = module['read_json'](module['record_path'](token))
+                    assert data['agent_home_explicit'] == (override is not None)
+                    if legacy:
+                        data.pop('agent_home_explicit')
+                    module['write_json'](module['record_path'](token), data)
+                    if resume:
+                        data['session_id'] = str(uuid.uuid4())
+                        identifier = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+                        module['write_json'](module['snapshot_path'](identifier), data)
+                    else:
+                        identifier = token
+                # A different restore-server environment must not select another
+                # account/configuration when the saved launch had no override.
+                launch = ['env', 'CLAUDE_CONFIG_DIR=' + str(home / 'inherited-other'),
+                          sys.executable, str(helper), 'resume' if resume else 'start', identifier]
+                run('respawn-pane', '-k', '-t', pane, 'exec ' + shlex.join(launch))
+                def matching_trace():
+                    rows = [json.loads(p.read_text()) for p in traces.glob('*.json')]
+                    return [row for row in rows if row['token'] == token]
+                wait(lambda: bool(matching_trace()))
+                assert matching_trace()[0]['config_home'] == override
+                run('kill-window', '-t', pane)
             for directory in ('records', 'snapshots', 'locks'):
                 assert (state / directory).stat().st_mode & 0o777 == 0o700
             assert all(p.stat().st_mode & 0o777 == 0o600 for p in state.rglob('*') if p.is_file())
             print(json.dumps({'result': 'passed', 'synthetic_two_agent_launch_ms': launch_ms,
                               'plugin_save_ms': save_ms, 'plugin_restore_ms': restore_ms,
+                              'claude_configuration_cases': len(cases),
                               'real_agent_or_reboot': False}, indent=2))
         finally:
             run('kill-server', check=False)
