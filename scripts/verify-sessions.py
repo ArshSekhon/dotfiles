@@ -14,6 +14,7 @@ import pty
 import re
 import runpy
 import select
+import signal
 import shutil
 import struct
 import subprocess
@@ -229,7 +230,7 @@ def main():
                 wait_for(lambda: context(actor)[0] == dev_id)
                 assert context(observer) == observer_before
                 for previous_session in (source_id, dev_id):
-                    press(b"\x01b")
+                    press(b"\x01o")
                     wait_for(lambda: context(actor)[0] == previous_session)
                     assert context(observer) == observer_before
                 open_picker()
@@ -260,7 +261,6 @@ def main():
 
                 # A narrow terminal still accepts real shifted keys and letter jumps.
                 fcntl.ioctl(masters[0], termios.TIOCSWINSZ, struct.pack("HHHH", 24, 70, 0, 0))
-                import signal
                 os.kill(clients[0].pid, signal.SIGWINCH)
                 drain(0.15)
                 narrow_ms = open_picker()
@@ -308,6 +308,74 @@ def main():
             run("select-pane", "-t", source_pane)
             pane_snapshot = snapshot()
 
+            # Maximize/restore and spatial focus keep the underlying layout intact.
+            layout_before = run("display-message", "-p", "-t", source_pane, "#{window_layout}")
+            for zoomed in (False, True):
+                if zoomed:
+                    press(b"\x01z")
+                    assert run("display-message", "-p", "-t", source_pane, "#{window_zoomed_flag}") == "1"
+                for key in (b"l", b"j", b"h", b"k"):
+                    press(b"\x01" + key)
+                    assert run("display-message", "-p", "-t", source_pane, "#{window_zoomed_flag}") == str(int(zoomed))
+                    assert context(observer) == observer_before and snapshot() == pane_snapshot
+                assert context(actor)[1] == source_pane
+                if zoomed:
+                    press(b"\x01z")
+            assert run("display-message", "-p", "-t", source_pane, "#{window_layout}") == layout_before
+
+            # Numbered placement freezes the source, ignores a foreign mark, and
+            # keeps focus. Cancelling or choosing this pane never moves anything.
+            def cell(pane):
+                return run("display-message", "-p", "-t", pane, "#{pane_left}:#{pane_top}")
+
+            def number(pane):
+                return run("display-message", "-p", "-t", pane, "#{pane_index}").encode()
+
+            original_cell = cell(source_pane)
+            move_readiness = []
+            for width in (120, 70):
+                fcntl.ioctl(masters[0], termios.TIOCSWINSZ, struct.pack("HHHH", 40, width, 0, 0))
+                os.kill(clients[0].pid, signal.SIGWINCH)
+                wait_for(lambda: run("display-message", "-p", "-c", actor, "#{client_width}") == str(width))
+                original_cell, right_cell = cell(source_pane), cell(right)
+                press(b"\x01z")
+                output.clear()
+                started = time.perf_counter()
+                os.write(masters[0], b"\x01m")
+                wait_for(lambda: b"Move to pane (Esc cancels)" in clean_output())
+                move_readiness.append((time.perf_counter() - started) * 1000)
+                assert run("display-message", "-p", "-t", source_pane, "#{window_zoomed_flag}") == "0"
+                press(number(right))
+                wait_for(lambda: cell(source_pane) == right_cell)
+                assert cell(right) == original_cell and context(actor)[1] == source_pane
+                assert context(observer) == observer_before and snapshot() == pane_snapshot
+                press(b"\x01m")
+                press(number(right))
+                wait_for(lambda: cell(source_pane) == original_cell)
+                for cancel in (b"\x1b", b"\x03"):
+                    press(b"\x01m")
+                    before_cancel = run("capture-pane", "-p", "-t", source_pane)
+                    press(cancel)
+                    assert cell(source_pane) == original_cell and snapshot() == pane_snapshot
+                    assert run("capture-pane", "-p", "-t", source_pane) == before_cancel
+                press(b"\x01m")
+                press(number(source_pane))
+                assert cell(source_pane) == original_cell and context(actor)[1] == source_pane
+            fcntl.ioctl(masters[0], termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
+            os.kill(clients[0].pid, signal.SIGWINCH)
+            wait_for(lambda: run("display-message", "-p", "-c", actor, "#{client_width}") == "120")
+
+            # Balance neighboring sizes without moving processes between windows.
+            lower = next(line.split(":")[0] for line in run("list-panes", "-t", source_pane, "-F",
+                         "#{pane_id}:#{pane_left}:#{pane_top}").splitlines()
+                         if line.split(":")[1] == original_cell.split(":")[0] and int(line.split(":")[2]) > 0)
+            run("resize-pane", "-t", source_pane, "-D", "4")
+            press(b"\x01=")
+            heights = [int(run("display-message", "-p", "-t", pane, "#{pane_height}")) for pane in (source_pane, lower)]
+            assert abs(heights[0] - heights[1]) <= 1, heights
+            assert context(actor)[1] == source_pane and context(observer) == observer_before
+            assert snapshot() == pane_snapshot
+
             # Last-pane toggles both ways in the invoking window, even with a
             # globally marked pane elsewhere. Preserve zoom and pane metadata.
             for zoomed in (False, True):
@@ -342,10 +410,26 @@ def main():
             wait_for(lambda: position() != original_position)
             assert run("display-message", "-p", "-t", source_pane, "#{window_zoomed_flag}") == "0"
             assert context(actor)[1] == source_pane and snapshot() == pane_snapshot
+            # Lift the actual invoking process into a new window, never a marked
+            # pane in another session. Repeating on a standalone pane is a no-op.
+            old_window = run("display-message", "-p", "-t", source_pane, "#{window_id}")
+            press(b"\x01!")
+            wait_for(lambda: run("display-message", "-p", "-t", source_pane, "#{window_id}") != old_window)
+            assert context(actor) == (source_id, source_pane)
+            assert context(observer) == observer_before and snapshot() == pane_snapshot
+            assert run("show-option", "-pqv", "-t", source_pane, "@dotfiles_agent_record") == "kept-record"
+            assert run("display-message", "-p", "-t", source_pane, "#{window_panes}") == "1"
+            lifted_windows = run("list-windows", "-a", "-F", "#{session_id}:#{window_id}")
+            press(b"\x01!")
+            assert run("list-windows", "-a", "-F", "#{session_id}:#{window_id}") == lifted_windows
+            assert context(actor) == (source_id, source_pane) and snapshot() == pane_snapshot
+
             print("Passed: stable/private keys, assignment/clear/cancel, concurrent writes, malformed state,")
             print("reserved-key migration, e editing, J/K and Shift-arrow ordering, reopened names, letter jumps,")
             print("two-client routing, 120/70-column UI,")
-            print("pane back-and-forth/zoom, swaps/focus/edges/marked-pane safety and preserved processes/metadata.")
+            print("maximize/zoomed focus, numbered placement/cancel, balance/lift, pane back-and-forth,")
+            print("spatial swaps/edges/marked-pane safety and preserved processes/metadata.")
+            print("Numbered move first paint {:.1f}/{:.1f} ms at 120/70 columns.".format(*move_readiness))
             print("First inventory {:.1f} ms; popup {:.1f}/{:.1f} ms; one-second idle CPU {:.1f}%.".format(
                   first_ms, popup_ms, narrow_ms, idle_cpu))
         finally:

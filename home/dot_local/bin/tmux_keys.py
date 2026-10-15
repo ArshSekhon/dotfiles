@@ -10,10 +10,10 @@ PREFIX = (
     ('prefix', 'c', 'New shell window in the current folder', 'bind c new-window -c "#{pane_current_path}"'),
     ('prefix', '|', 'Shell split: side by side', 'bind | split-window -h -c "#{pane_current_path}"'),
     ('prefix', '-', 'Shell split: top and bottom', 'bind - split-window -v -c "#{pane_current_path}"'),
-    ('prefix', 'h', 'Move left', 'bind h select-pane -L'),
-    ('prefix', 'j', 'Move down', 'bind j select-pane -D'),
-    ('prefix', 'k', 'Move up', 'bind k select-pane -U'),
-    ('prefix', 'l', 'Move right', 'bind l select-pane -R'),
+    ('prefix', 'h', 'Focus left; keep zoom', 'bind h select-pane -L -Z'),
+    ('prefix', 'j', 'Focus down; keep zoom', 'bind j select-pane -D -Z'),
+    ('prefix', 'k', 'Focus up; keep zoom', 'bind k select-pane -U -Z'),
+    ('prefix', 'l', 'Focus right; keep zoom', 'bind l select-pane -R -Z'),
     ('prefix', 'H', 'Resize left', 'bind -r H resize-pane -L 5'),
     ('prefix', 'J', 'Resize down', 'bind -r J resize-pane -D 5'),
     ('prefix', 'K', 'Resize up', 'bind -r K resize-pane -U 5'),
@@ -27,6 +27,17 @@ PREFIX = (
             + '"swap-pane -d -s #{pane_id} -t \\"{' + direction + '-of}\\""\'')
            for arrow, direction, edge in (('Left', 'left', 'left'), ('Down', 'down', 'bottom'),
                                            ('Up', 'up', 'top'), ('Right', 'right', 'right'))),
+    # Choose a numbered position; capture the source before the overlay opens.
+    # A native numeric prompt handles keys; the visual overlay alone passes Esc
+    # through to applications. Consume cancellation here so agents are untouched.
+    ('prefix', 'm', 'Move pane: swap with a numbered position',
+     'bind m run-shell -C \'if-shell -F "#{window_zoomed_flag}" "resize-pane -Z -t #{pane_id}"'
+     ' ; command-prompt -b -1 -N -p "Move to pane (Esc cancels)"'
+     ' "swap-pane -d -s #{pane_id} -t #{window_id}.%%"'
+     ' ; display-panes -N -d 0 -t #{q:client_name}\''),
+    ('prefix', '!', 'Lift pane into a new window',
+     'bind ! run-shell -C \'if-shell -F "#{>:#{window_panes},1}" "break-pane -s #{pane_id} -t #{session_id}:" "display-message \\"Pane already has its own window\\""\''),
+    ('prefix', '=', 'Balance adjacent pane sizes', 'bind = select-layout -E'),
     ('prefix', 'p', 'Previous pane; keep zoom', 'bind p last-pane -Z'),
     ('prefix', 'Tab', 'Previous window', 'bind Tab last-window'),
     ('prefix', 's', 'Session picker: letter shortcuts and custom order', 'bind s run-shell -C "display-popup -EE -w 80% -h 75% -T \'Sessions\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} \'exec \\"\\$HOME/.local/bin/tmux-sessions\\"\'"'),
@@ -34,14 +45,24 @@ PREFIX = (
     ('prefix', 'R', 'Reload configuration', 'bind R source-file ~/.tmux.conf \\; display-message "tmux reloaded"'),
     ('prefix', '?', 'Shortcut cheatsheet', 'bind ? display-popup -EE -w 85% -h 85% -T \'Keys\' \'exec env LESS= LESSOPEN= LESSCLOSE= LESSHISTFILE=- LESSSECURE=1 less -i -P"j/k scroll  / search  q close" "$HOME/.config/tmux/cheatsheet.txt"\''),
     ('prefix', 'N', 'Workspace: launch an agent or scratch task', 'bind N run-shell -C "display-popup -EE -w 64 -h 13 -T \'Workspace\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} -e DOTFILES_TMUX_PANE=#{pane_id} \'exec \\"\\$HOME/.local/bin/tmux-workspace\\" --menu\'"'),
-    ('prefix', 'b', 'Previous session', 'bind b switch-client -l'),
+    ('prefix', 'o', 'Previous session', 'bind o switch-client -l'),
     ('prefix', 'g', 'Find existing tasks, agents and panes', 'bind g run-shell -C "display-popup -EE -w 90% -h 80% -T \'Tasks\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} \'exec \\"\\$HOME/.local/bin/tmux-tasks\\"\'"'),
     ('prefix', 'a', 'Next agent needing attention', 'bind a run-shell \'DOTFILES_TMUX_CLIENT=#{q:client_name} DOTFILES_TMUX_SOCKET=#{q:socket_path} exec "$HOME/.local/bin/tmux-tasks" --next-attention\''),
     ('prefix', 'A', 'Attention queue', 'bind A run-shell -C "display-popup -EE -w 90% -h 80% -T \'Attention\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} \'exec \\"\\$HOME/.local/bin/tmux-tasks\\" --attention\'"'),
     ('prefix', 'B', 'Previous task', 'bind B run-shell \'DOTFILES_TMUX_CLIENT=#{q:client_name} DOTFILES_TMUX_SOCKET=#{q:socket_path} exec "$HOME/.local/bin/tmux-tasks" --previous\''),
     ('prefix', 'r', 'Review current task; save private feedback', 'bind r run-shell -C "display-popup -EE -w 95% -h 90% -T \'Local review\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} -e DOTFILES_TMUX_PANE=#{pane_id} \'exec \\"\\$HOME/.local/bin/tmux-review\\"\'"'),
-    ('prefix', 'z', 'Toggle pane zoom', 'bind z resize-pane -Z'),
+    ('prefix', 'z', 'Maximize / restore pane', 'bind z resize-pane -Z'),
     ('prefix', '[', 'Enter copy mode', 'bind [ copy-mode'),
+    # User status ranges dispatch through Status; retain native window selection.
+    # Native format conditions and switch-client keep this local to the clicking client.
+    ('root', 'MouseDown1Status', 'Select window labels; reserve the [Last] button',
+     'bind -T root MouseDown1Status if-shell -F \'#{!=:#{mouse_status_range},last-session}\' '
+     '\'select-window -t =\' \'\''),
+    # Release events stay consistent when tmux classifies rapid presses as double/triple clicks.
+    ('root', 'MouseUp1Status', 'Click [Last] to toggle the previous session',
+     'bind -T root MouseUp1Status if-shell -F '
+     '\'#{&&:#{==:#{mouse_status_range},last-session},#{!=:#{client_last_session},}}\' '
+     '\'switch-client -l\' \'\''),
 )
 
 # Explicit per-server choice, sourced from the inner host's private override.
@@ -104,7 +125,8 @@ REVIEW_ACTIONS = {"p": ("prepare", "prepare feedback for this agent"),
 
 
 def key_label(key):
-    aliases = {"enter": "Enter", "tab": "Tab", "esc": "Esc", "C-a": "Ctrl+A"}
+    aliases = {"enter": "Enter", "tab": "Tab", "esc": "Esc", "C-a": "Ctrl+A",
+               "MouseUp1Status": "Left click"}
     if key in aliases:
         return aliases[key]
     if key.startswith("ctrl-"):
@@ -250,16 +272,23 @@ def cheatsheet():
             binding("Previous pane (keeps zoom)", "last-pane -Z"),
             binding("Session / window picker", "tmux-sessions", "choose-tree -Zw"),
         ]),
-        ("Windows & panes", [
+        ("Focus & size", [
+            binding("Maximize / restore pane", "bind z resize-pane -Z"),
+            binding("Focus left / down / up / right", "select-pane -L", "select-pane -D", "select-pane -U", "select-pane -R"),
+            binding("Resize left / down / up / right", "resize-pane -L", "resize-pane -D", "resize-pane -U", "resize-pane -R"),
+        ]),
+        ("Move & arrange", [
+            binding("Swap with a numbered position", "display-panes"),
+            binding("Move pane left", "{left-of}"),
+            binding("Move pane down", "{down-of}"),
+            binding("Move pane up", "{up-of}"),
+            binding("Move pane right", "{right-of}"),
+            binding("Lift pane into a new window", "break-pane"),
+            binding("Balance adjacent pane sizes", "select-layout -E"),
+        ]),
+        ("Windows & splits", [
             binding("New shell window (current folder)", "new-window"),
             binding("Shell split: beside / below", "split-window -h", "split-window -v"),
-            binding("Move left / down / up / right", "select-pane -L", "select-pane -D", "select-pane -U", "select-pane -R"),
-            binding("Resize left / down / up / right", "resize-pane -L", "resize-pane -D", "resize-pane -U", "resize-pane -R"),
-            binding("Swap pane left", "{left-of}"),
-            binding("Swap pane down", "{down-of}"),
-            binding("Swap pane up", "{up-of}"),
-            binding("Swap pane right", "{right-of}"),
-            binding("Zoom / unzoom pane", "bind z resize-pane -Z"),
         ]),
         ("Copy & settings", [
             binding("Copy mode (v selects, y copies)", "copy-mode"),
@@ -278,6 +307,17 @@ def cheatsheet():
         lines.append("  Other controls")
         rows(extra, indent=4)
         lines.append("")
+
+    lines.extend(["Focus keeps zoom; arranging reveals the layout.",
+                  "After " + next(key_label(key) for table, key, _, command in PREFIX
+                                  if table == "prefix" and "display-panes" in command)
+                  + ": choose a displayed pane number; Esc cancels.", ""])
+
+    heading("STATUS BAR  |  No prefix",
+            "[Last] toggles sessions for this client. Dimmed means no previous session.")
+    rows([binding("[Last]: previous session; window labels: select window",
+                  "switch-client -l", table="root")])
+    lines.append("")
 
     heading("SESSIONS  |  Ctrl+A " + prefix_key("tmux-sessions"),
             "Inside popup: letter keys jump directly. Order and keys persist privately by session name.")
@@ -352,4 +392,6 @@ def cheatsheet():
     heading("COPY MODE  |  After Ctrl+A " + next(key_label(key) for table, key, _, command in PREFIX
                                                if table == "prefix" and command.endswith(" copy-mode")))
     rows([(key_label(key), label) for table, key, label, _ in PREFIX if table == "copy-mode-vi"])
+    lines.extend(["  Inner profile: Ctrl+B [ enters inner copy mode.",
+                  "  Nested copying needs set-clipboard on outside too."])
     return "\n".join(lines) + "\n"

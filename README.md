@@ -5,9 +5,56 @@ first verified platform. [AGENTS.md](AGENTS.md) records scope and decisions;
 [BOOTSTRAP.md](BOOTSTRAP.md) describes agent-run installation and preservation.
 Package installation and configuration application are separate operations.
 
-The `home/` source currently manages tmux, its workspace/scratch/recovery/task helpers,
-zsh, Neovim, local tuicr reviews, and Claude's status-line renderer. Other platforms
-still need testing.
+The `home/` source currently manages Ghostty, tmux and its workspace/scratch/recovery/task
+helpers, zsh, Neovim, local tuicr reviews, and Claude's status-line renderer. Ubuntu
+and macOS are the verified platforms; individual verification limits are recorded below.
+
+## Ghostty and remote paste
+
+Ghostty starts from [GitHub Dark](https://terminalcolors.com/themes/github/dark/)
+using the downloaded palette versioned in `home/dot_config/ghostty/themes/github-dark`,
+with a bright neutral foreground, a pure-black
+background, 90% opacity, native blur at 20, JetBrainsMono Nerd Font Mono Medium at
+15 pt, and 12 pt padding. Minimum contrast is 3 for readable secondary text. Cell background
+opacity keeps translucency in tmux and Neovim. Shared tmux terminal features preserve
+24-bit colors in Ghostty, Mosh 1.4+ and nested tmux. Install Ghostty 1.2.3+ and the font
+separately, then apply the entire `home/dot_config/ghostty/` directory with chezmoi
+(`apply --recursive --parent-dirs ~/.config/ghostty`). There are
+no shaders, theme downloads, or automatic tmux launches.
+
+The shared file is `~/.config/ghostty/config.ghostty`. Ghostty also loads the older
+XDG `config` and both `config`/`config.ghostty` under macOS's
+`~/Library/Application Support/com.mitchellh.ghostty/`; later files can override it.
+Archive conflicts and validate the normal launch with `ghostty +validate-config`
+and `ghostty +show-config`. Cmd+Shift+, (Command+Shift+comma) reloads settings;
+Cmd+0 resets a manually zoomed terminal to the configured font size. macOS background
+opacity requires a complete Ghostty restart when convenient. Preserve running sessions.
+The managed theme uses the linked download's colors rather than a similarly named
+built-in theme. Apply config and theme together; no theme fetch runs at startup.
+Agent interfaces draw their own panels: Codex's `/theme` picker is documented for
+syntax highlighting, so do not promise that terminal settings remove its input panels.
+
+| Input | Codex and Claude, including nested tmux |
+| --- | --- |
+| Cmd+V | Paste text through the terminal, with bracketed paste and paste protection |
+| Ctrl+Shift+Cmd+4, then Ctrl+V in the agent | Copy a screenshot to the Mac clipboard, then attach it through the installed remote image bridge |
+| Copied image, then Ctrl+V | Attach the clipboard image through the same bridge |
+
+Image paste uses [cc-clip](https://github.com/ShunmeiCho/cc-clip), installed separately.
+The Claude clipboard shim and Codex X11 bridge are both required. OSC 52 handles
+text copying; it does not carry image attachments. Ctrl+V stays available to the
+agents. The authenticated clipboard service reads images on request and the SSH
+tunnel stays on loopback. Agent notifications/settings are preserved by deploying
+each target with `--no-notify`. See [BOOTSTRAP.md](BOOTSTRAP.md#remote-clipboard-and-mosh)
+for installation, restart behavior, and validation.
+
+On Macs, `ssh HOST` with just one destination uses Mosh when the resolved SSH
+hostname appears in [`mosh-hosts`](home/dot_config/dotfiles/mosh-hosts). The initial
+allowlist contains `devbox.home.arpa`; its SSH alias also resolves to that entry.
+Other hosts, SSH flags, remote commands, and scripts keep SSH. `command ssh HOST`
+explicitly uses plain SSH. Mosh uses the same private SSH credentials; its separate
+clipboard tunnel reconnects via launchd, including while using Mosh. No network
+work or service installation runs at shell startup.
 
 ## Agent status lines
 
@@ -221,16 +268,32 @@ their own order. Ctrl+A, w continues to open the native window tree.
 Earlier shortcuts using e/J/K automatically receive another available letter;
 session order and other shortcuts stay saved.
 
-Ctrl+A, **Shift+Arrow** swaps the active pane with its neighbor in that direction,
-keeping focus on the same running process. At an outer edge it stays put; a zoomed
-pane reveals its layout before moving. h/j/k/l selects panes and H/J/K/L resizes
-them. Pane labels, agent IDs and attention stay with the pane. These keys move
-panes within the current window; they do not move them between sessions.
+Pane controls use the active prefix: **Ctrl+A** by default, **Ctrl+B** on an
+inner server with `inner.conf`. Press it once, then:
 
-For quick back-and-forth, **Ctrl+A, b** returns to the last session,
+| Key | Action |
+| --- | --- |
+| `z` | Maximize the pane; press again to restore the layout |
+| `h/j/k/l` | Focus left/down/up/right, keeping maximized mode |
+| `H/J/K/L` | Resize left/down/up/right |
+| `Shift+Arrow` | Swap with the neighboring pane; keep focus |
+| `m`, then a displayed number | Swap into that position; Esc cancels |
+| `!` | Lift the pane into its own new window |
+| `=` | Balance adjacent pane sizes |
+
+Moving reveals a zoomed layout; directional swaps stop at the outer edges.
+Numbers select positions in the current window. Lifting follows the same process
+into its new window; it does nothing when the pane already has its own window.
+Pane IDs, running processes, labels, agent records and attention stay with the pane.
+
+For quick back-and-forth, **Ctrl+A, o** returns to the last session,
 **Ctrl+A, Tab** to the last window, and **Ctrl+A, p** to the last pane in the
 current window (keeping zoom). Press the same shortcut again to return.
 **Ctrl+A, Shift+B** toggles the last two task panes visited through the task switcher.
+Click **[Last]** in the bottom status bar to toggle the previous session without
+a prefix. It uses this client's session history; other attached clients stay put.
+The button is dimmed when there is no previous session. Window labels still select
+their windows when clicked.
 
 Ctrl+A, g searches sessions, windows, pane labels, tools, and folders. Enter jumps;
 Alt+s opens a shell in the selected folder, and Ctrl+R opens its local review.
@@ -265,7 +328,8 @@ this line at the end of its private `~/.tmux.local.conf`:
 source-file ~/.config/tmux/inner.conf
 ```
 
-Run `tmux source-file ~/.config/tmux/inner.conf` there to activate it immediately,
+Installing the profile alone does not activate it. Run
+`tmux source-file ~/.config/tmux/inner.conf` there to activate it immediately,
 without restarting sessions or reloading plugins. Ctrl+A, s opens outer sessions;
 Ctrl+B, s opens inner sessions. All documented Ctrl+A shortcuts use Ctrl+B on
 that inner server, and Ctrl+B twice sends a literal Ctrl+B to its application.
@@ -294,7 +358,13 @@ tmux load-buffer -w path/to/file
 git diff | tmux load-buffer -w -
 ```
 
-The managed configuration uses native OSC 52 over SSH, with no clipboard daemon.
+Text copying uses native OSC 52 over SSH or Mosh. Both tmux layers need
+`set-clipboard on` and an `Ms` terminal capability; the shared config declares
+clipboard support for tmux/screen terminals. Mosh 1.4 accepts only the `c` clipboard
+selector, so the shared xterm override emits that selector even with tmux 3.4.
+After changing terminal capabilities, detach only the inner client with
+**Ctrl+B, d**, then run `tmux attach` in the remote shell. Running panes survive;
+each attached client picks up the new capability when it reattaches.
 [Ghostty](https://ghostty.org/docs/config/reference#clipboard-write) allows writes by
 default; [RootShell](https://www.rootshell.com/release-notes.html) also supports OSC 52
 (control-mode pane support was added in 1.0.8-108). Verify each device by copying a

@@ -352,7 +352,7 @@ def main():
             draft = task_dir / "draft.txt"
             draft.write_text("Keep this draft.\n")
             pane = active_pane()
-            press(b"\x01b")
+            press(b"\x01o")
             assert run("list-clients", "-F", "#{session_name}") == "baseline"
             scratch_started = time.perf_counter()
             scratch("team-update")
@@ -462,7 +462,7 @@ def main():
             assert all(pane in run("list-panes", "-a", "-F", "#{pane_id}:#{pane_pid}")
                        for pane in before_session.splitlines())
             assert preference.read_text() == "codex\n"
-            press(b"\x01b")
+            press(b"\x01o")
             assert run("list-clients", "-F", "#{session_name}") == "scratch"
             unchanged = run("list-panes", "-a", "-F", "#{pane_id}:#{pane_pid}")
             press(b"\x01N")
@@ -479,7 +479,7 @@ def main():
                 press(b"\x1b")
                 assert run("list-panes", "-a", "-F", "#{pane_id}:#{pane_pid}") == unchanged
                 assert preference.read_text() == "codex\n"
-            # Restore the fixture's previous-session order after checking Ctrl+A, b.
+            # Restore the fixture's previous-session order after checking Ctrl+A, o.
             run("switch-client", "-c", client_name, "-t", "=baseline")
             run("switch-client", "-c", client_name, "-t", "=scratch")
 
@@ -610,7 +610,7 @@ def main():
             assert recent.stat().st_mode & 0o777 == 0o600
             assert all(pane in run("list-panes", "-a", "-F", "#{pane_id}:#{pane_pid}")
                        for pane in picker_before.splitlines())
-            press(b"\x01b")
+            press(b"\x01o")
             assert run("list-clients", "-F", "#{session_name}") == "scratch"
             open_picker(b"spicked-review\x06")  # Ctrl+F while naming preserves the name.
             choose_folder("Beta Project", "picked-review")
@@ -618,7 +618,7 @@ def main():
             wait_for(lambda: run("list-clients", "-F", "#{session_name}") == "picked-review")
             assert run("display-message", "-p", "-c", client_name, "#{pane_current_path}") == str(beta)
             assert json.loads(recent.read_text())[:2] == [str(beta), str(alpha)]
-            press(b"\x01b")
+            press(b"\x01o")
             unchanged_picker = run("list-panes", "-a", "-F", "#{pane_id}:#{pane_pid}")
             latest_recent = recent.read_bytes()
             open_picker(b"sdraft-name\x06")
@@ -690,7 +690,7 @@ def main():
             wait_for(lambda: run("list-clients", "-F", "#{session_name}") == "my-folder")
             assert run("display-message", "-p", "-c", client_name, "#{pane_current_path}") == str(home_folder)
             assert json.loads(recent.read_text())[0] == str(home_folder)
-            press(b"\x01b")
+            press(b"\x01o")
             unchanged_picker = run("list-panes", "-a", "-F", "#{pane_id}:#{pane_pid}")
             latest_recent = recent.read_bytes()
             # Missing dependencies or invalid roots remain visible without creating sessions.
@@ -752,13 +752,13 @@ def main():
             assert run("display-message", "-p", "-c", client_name,
                        "#{pane_dead_status}") in ("", "1")
             assert "fixture startup failure" in run("capture-pane", "-p", "-J", "-S", "-100", "-t", active_pane())
-            press(b"\x01b")
+            press(b"\x01o")
             assert run("list-clients", "-F", "#{session_name}") == "scratch"
             run("switch-client", "-c", client_name, "-t", "=baseline")
             run("switch-client", "-c", client_name, "-t", "=scratch")
             assert all(pane in run("list-panes", "-a", "-F", "#{pane_id}:#{pane_pid}")
                        for pane in original_panes.splitlines())
-            press(b"\x01b")
+            press(b"\x01o")
             assert run("list-clients", "-F", "#{session_name}") == "baseline"
             run("source-file", str(config))
             assert run("list-keys", "-T", "prefix") == bindings

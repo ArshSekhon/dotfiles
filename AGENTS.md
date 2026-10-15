@@ -98,6 +98,8 @@ in BOOTSTRAP.md and machine-specific records outside Git.
 - Tmux pane-swap sources can use a globally marked pane even with `-s .`.
   Freeze the invoking pane ID with native `run-shell -C`, pass it explicitly,
   and verify swaps with a marked pane in another attached client's session.
+  Native numbered overlays forward Escape to applications; pair the overlay with
+  a numeric prompt and verify Escape/Ctrl+C cancellation never reaches an agent.
 - Terminal control sequences can split words in captured PTY output. Normalize
   them before readiness checks, or timings can measure a later redraw instead.
 - Match verification to the behavior we own. Use short isolated checks for simple
@@ -105,9 +107,20 @@ in BOOTSTRAP.md and machine-specific records outside Git.
   failure modes. Avoid maintaining tests of upstream tools and plugins.
 - Scoped chezmoi directory previews need `diff --recursive`; first application
   needs `--parent-dirs` when ancestors are missing. Verify nested files explicitly.
+- Matching managed files does not prove the application uses their defaults.
+  Audit alternate startup paths and override loaders, then verify normal fresh
+  launches; explicit `-f`/`-u` checks can hide a legacy configuration loaded later.
+  When the user requests repository defaults, archive conflicting loaders and
+  keep machine runtime paths separate from UI/keymap preferences.
 - Diagnose nested tmux mouse input in both layers before overriding wheel bindings.
   Native forwarding works when the inner application requests mouse; global/session
   nesting toggles can also change input for other attached clients.
+- Terminal text paste, OSC 52 text copying, and binary image attachment use different
+  paths. Verify each requested path; an xclip shim alone cannot serve Codex's native
+  X11 clipboard reader. Mosh needs a separate SSH tunnel for an image bridge.
+- An available Ms capability does not prove Mosh forwards a copy. Mosh 1.4 accepts
+  only OSC 52 selector c; verify real transport output and reattach tmux 3.4 clients
+  after changing terminal capabilities, preserving running panes.
 - Preserve whether agent configuration overrides were unset. Exporting
   `CLAUDE_CONFIG_DIR=~/.claude` changes the `.claude.json` lookup despite appearing
   to name its default; freeze explicit choices in recovery snapshots.
@@ -135,6 +148,22 @@ The inventory checks OS, architecture, login shell, tool paths/versions, connect
 markers, configuration presence, and legacy loader references. It prints no config
 contents or connection addresses and does not source startup files or change setup.
 Do not commit its output: executable paths are machine-specific.
+
+Ghostty uses a managed XDG config and versioned GitHub Dark palette from the user's
+TerminalColors reference: a bright neutral
+foreground, black background, 90% opacity, native blur, and 15 pt JetBrainsMono Nerd
+Font Mono Medium with 12 pt padding and minimum contrast 3. Audit the later macOS config
+locations before applying. Macs default to Mosh only for simple interactive SSH
+destinations resolved against `home/dot_config/dotfiles/mosh-hosts`; flags, pipelines,
+scripts and other hosts keep SSH. The initial allowlist is `devbox.home.arpa`.
+cc-clip provides both Claude's clipboard shim and Codex's authenticated X11 bridge;
+native launchd SSH tunnels support Mosh. Installation stays separate from startup.
+Mac/Linux checks, 2026-10-12: default Ghostty loading, repeated scoped application,
+offline routing boundaries, Unicode/bracketed paste and Ctrl+V through single/nested
+tmux over SSH and Mosh passed. A synthetic PNG transferred byte-for-byte through
+both image readers using an isolated clipboard provider. Real clipboard/image-chip
+checks in agent composers remain manual. Agent config/hooks and live sessions were
+preserved; machine-specific backups/results stay private. See BOOTSTRAP.md.
 
 Agent footers use native Codex fields and a small Claude JSON renderer. Explicit
 work/personal mode is private; work shows model/effort/context/branch, while personal
@@ -249,8 +278,22 @@ Help explains the prefix substitution. Role selection is explicit, never inferre
 from SSH. Apply the profile, catalog and help together; see BOOTSTRAP.md for scope
 and restoration. No watcher, polling or dependency is added.
 Ubuntu/tmux 3.4 nested PTYs passed prefix/wheel routing, literal Ctrl+B, reloads
-and scoped chezmoi restoration. The profile/help are installed; this pilot stays
-on Ctrl+A. Work-machine activation and physical terminals remain unverified.
+and scoped chezmoi restoration. The profile/help are installed. Ubuntu activation
+is recorded below; work-machine activation and physical terminals remain unverified.
+
+Ubuntu nested-copy fix, 2026-10-12: the user selected this server as the inner
+layer beneath Mac tmux. Its private override now persists Ctrl+B; the shared
+default remains Ctrl+A for the outer layer. Mosh 1.4.0 dropped tmux 3.4's empty
+OSC 52 selector despite valid Ms capabilities in both layers. A fixed xterm Ms
+override emits selector c, and tmux/screen clients declare clipboard support.
+Current-source isolated nested PTYs with real loopback Mosh at 120/70 columns
+reproduced the failure and passed copy-mode selection, multiline Unicode,
+literal Ctrl+B, reattachment, reload/pane preservation, and scoped chezmoi
+preview/dry-run/reruns/restoration. Baseline tmux checks passed with 0% sampled
+idle CPU. Applied only native options/profile, preserving all live pane IDs/PIDs,
+layouts, attached clients, mouse and continuum status suffix. Existing tmux 3.4
+clients must detach/reattach to refresh Ms; none was disconnected automatically.
+Physical Mac clipboard delivery awaits the user's check.
 
 SSH clients: Ghostty on macOS and RootShell on iPad. Use native OSC 52; the pilot's
 attached xterm-256color clients advertise `Ms` and `set-clipboard` is already on.
@@ -263,12 +306,14 @@ confirmation is pending. No new dependency, watcher, or tmux restart is needed.
 | Ctrl+A | Send Ctrl+A to the application |
 | ? | Shortcut cheatsheet; j/k scroll, / searches, q closes |
 | c / \| / - | New window / horizontal split / vertical split |
-| h/j/k/l / H/J/K/L | Move / resize panes |
+| h/j/k/l / H/J/K/L | Focus (keeps zoom) / resize panes |
 | Shift+Arrow | Swap active pane with neighbor; keep its focus |
-| z | Toggle pane zoom |
+| z | Maximize / restore pane |
+| m then number | Swap active pane into a numbered position |
+| ! / = | Lift pane into its own window / balance adjacent sizes |
 | p / Tab | Previous pane (keeps zoom) / previous window; repeat to return |
 | s / w | Session / window picker |
-| N (Shift+N) / b | Workspace launcher / return to the previous session |
+| N (Shift+N) / o | Workspace launcher / return to the previous session |
 | g / B (Shift+B) | Search existing tasks/panes / return to the previous task |
 | a / A (Shift+A) | Next agent needing attention / attention queue |
 | r | Local tuicr review popup; reports a missing tool |
@@ -290,10 +335,24 @@ saved e/J/K shortcuts migrate to available letters. This order applies to this
 picker, without changing native IDs or other pickers.
 Ctrl+A, Shift+Arrow swaps panes inside the current window, preserving focus,
 IDs/processes/labels/attention. It reveals zoom first and stops at outer edges.
+Ctrl+A, z maximizes/restores; h/j/k/l keeps zoom while changing focus.
+Ctrl+A, m reveals numbered positions; a digit swaps with that pane, Esc cancels.
+Ctrl+A, ! lifts the invoking pane into a new window and follows it; already-alone
+panes stay put. Ctrl+A, = balances adjacent sizes. IDs/processes/private options
+survive these native operations; no helper or idle work is added.
 No process is launched for swaps; the picker blocks on input without polling.
-Ctrl+A, b/Tab/p toggles the last session/window/pane; repeat the same key to
-return. Pane toggling stays inside its window and preserves zoom. Ctrl+A, Shift+B
+Ctrl+A, o/Tab/p toggles the last session/window/pane; repeat the same key to
+return. o replaces the former b session shortcut. Pane toggling stays inside its
+window and preserves zoom. Ctrl+A, Shift+B
 keeps the separate previous-task history from task-picker visits.
+The bottom [Last] button clicks through to the same per-client previous session;
+it is dimmed/inert without history. Native user ranges and format conditions keep
+ordinary window clicks working, with no subprocess or polling added.
+Ubuntu/tmux 3.4 isolated 120/70-column checks passed disabled/repeated clicks,
+per-client routing, window selection and reload preservation; physical clicks
+remain a terminal-client check.
+Applied with private backups, preserving live panes/layouts/clients, private
+overrides and the existing continuum status suffix.
 Ubuntu/tmux 3.4 pilot, 2026-10-08: current-source session/pane and baseline checks
 passed with isolated two-client PTYs at 120/70 columns, including concurrent
 preferences, stale/malformed state, marked-pane routing, focus and metadata.
@@ -301,6 +360,14 @@ First inventory ~3 ms, popup ~64/70 ms, one-second idle CPU sample 0%.
 Scoped chezmoi preview/dry-run/reruns/restoration passed; applied with private
 backups, preserving all nine pane IDs/PIDs, layouts, client, override and continuum
 hook. Physical modified-arrow delivery and other platforms remain unverified.
+
+Ubuntu pane controls, 2026-10-14: current-source two-client PTYs passed maximize,
+zoomed focus, numbered swaps, Escape/Ctrl+C input isolation, balancing and lifting,
+including foreign marked panes and preserved IDs/processes/agent metadata at
+120/70 columns. Numbered prompt first paint ~31 ms; sampled idle CPU stayed 0%.
+Scoped chezmoi preview/dry-run/reruns/restoration passed. Applied seven bindings,
+preserving all 13 live panes/layouts, clients, private Ctrl+B override and continuum
+status suffix. Physical terminal delivery and other platforms remain unverified.
 
 Ctrl+A, Shift+N opens one Workspace menu. j/k chooses Scratch task (a private
 folder and named window), New agent pane (another agent in the current window/folder),

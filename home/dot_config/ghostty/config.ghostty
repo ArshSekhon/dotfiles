@@ -1,0 +1,24 @@
+# Starting point: https://terminalcolors.com/themes/github/dark/
+# The matching palette is versioned in themes/github-dark beside this config.
+theme = github-dark
+background = #000000
+foreground = #e6edf3
+minimum-contrast = 3
+background-opacity = 0.90
+background-blur = 20
+# Keep transparency in applications that paint their own backgrounds (tmux/nvim).
+background-opacity-cells = true
+
+font-family = JetBrainsMono Nerd Font Mono
+font-style = Medium
+font-size = 15
+window-padding-x = 12
+window-padding-y = 12
+window-theme = dark
+
+# Cmd+V pastes text. Leave Ctrl+V for Codex/Claude's native image-paste action.
+keybind = super+v=paste_from_clipboard
+clipboard-read = ask
+clipboard-write = allow
+clipboard-paste-protection = true
+clipboard-paste-bracketed-safe = true

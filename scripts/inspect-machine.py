@@ -15,6 +15,9 @@ TOOLS = {
     "chezmoi": ("chezmoi", "--version"),
     "zsh": ("zsh", "--version"),
     "tmux": ("tmux", "-V"),
+    "ghostty": ("ghostty", "--version"),
+    "mosh": ("mosh", "--version"),
+    "cc-clip": ("cc-clip", "--version"),
     "tuicr": ("tuicr", "--version"),
     "nvim": ("nvim", "--version"),
     "git": ("git", "--version"),
@@ -34,6 +37,10 @@ TOOLS = {
 CONFIG_PATHS = (
     ".bashrc", ".bash_aliases", ".profile", ".zshenv", ".zprofile",
     ".zshrc", ".tmux.conf", ".config/nvim", ".config/tuicr", ".config/chezmoi",
+    ".config/ghostty/config.ghostty", ".config/ghostty/config",
+    "Library/Application Support/com.mitchellh.ghostty/config.ghostty",
+    "Library/Application Support/com.mitchellh.ghostty/config",
+    ".config/dotfiles/mosh-hosts",
 )
 LEGACY_LOADERS = {
     ".bash_aliases": "shell/ipad.sh",
@@ -43,6 +50,10 @@ LEGACY_LOADERS = {
 
 def inspect_tool(command):
     executable = shutil.which(command[0])
+    if executable is None and command[0] == "ghostty" and platform.system() == "Darwin":
+        app_binary = Path("/Applications/Ghostty.app/Contents/MacOS/ghostty")
+        if app_binary.is_file():
+            executable = str(app_binary)
     if executable is None:
         return {"installed": False}
     result = {"installed": True, "path": executable}

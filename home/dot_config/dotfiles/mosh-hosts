@@ -1,0 +1,2 @@
+# Exact SSH hostnames for default Mosh connections from Macs. No wildcards.
+devbox.home.arpa

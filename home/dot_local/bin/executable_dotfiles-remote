@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Choose Mosh for allowlisted interactive Mac connections; otherwise use SSH."""
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] in ("-h", "--help"):
+        print("Usage: dotfiles-remote [user@]HOST\n"
+              "Mac: Mosh for hosts in ~/.config/dotfiles/mosh-hosts; SSH otherwise.\n"
+              "SSH aliases are resolved with ssh -G. Use command ssh for plain SSH.")
+        return 0 if sys.argv[1:] == ["--help"] or sys.argv[1:] == ["-h"] else 2
+    destination = sys.argv[1]
+    if destination.startswith("-") or any(c.isspace() for c in destination):
+        print("Expected one SSH host, without flags or a remote command.", file=sys.stderr)
+        return 2
+    ssh = shutil.which("ssh")
+    if not ssh:
+        print("ssh is not installed", file=sys.stderr)
+        return 1
+    env = os.environ.copy()
+    # Ghostty's terminfo is not universally installed on remote hosts.
+    if env.get("TERM") == "xterm-ghostty":
+        env["TERM"] = "xterm-256color"
+    allowlist = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "dotfiles/mosh-hosts"
+    try:
+        hosts = {line.split("#", 1)[0].strip() for line in allowlist.read_text().splitlines()}
+    except FileNotFoundError:
+        hosts = set()
+    mosh = shutil.which("mosh")
+    if sys.platform == "darwin" and mosh and sys.stdin.isatty() and sys.stdout.isatty():
+        resolved = subprocess.run([ssh, "-G", destination], check=False, capture_output=True, text=True, env=env)
+        hostname = next((line.split(None, 1)[1] for line in resolved.stdout.splitlines()
+                         if line.startswith("hostname ")), "")
+        if resolved.returncode == 0 and hostname in hosts:
+            # Mosh carries terminal input over UDP. The separately installed SSH
+            # LaunchAgent keeps the clipboard bridge alive across reconnects.
+            os.execvpe(mosh, [mosh, "--", destination], env)
+    os.execvpe(ssh, [ssh, destination], env)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

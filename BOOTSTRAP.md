@@ -17,6 +17,9 @@ not targets.
 | Scope | Tools/capabilities | Purpose |
 | --- | --- | --- |
 | Configuration management | Git, chezmoi | Repository access, configuration preview/application |
+| Mac terminal | Ghostty 1.2.3+, JetBrainsMono Nerd Font Mono | Shared black/translucent GitHub Dark terminal |
+| Mac remote access | Mosh client, remote mosh-server, SSH | Default Mosh for exact allowlisted interactive hosts |
+| Remote image paste | cc-clip, local pngpaste; Linux curl, xclip, Xvfb, xauth | Both Codex and Claude clipboard images, including Mosh and nested tmux |
 | Shared tmux setup | tmux | Sessions, panes, popups; verified with 3.4, other versions need checks |
 | Shortcut cheatsheet | less | On-demand scrolling/search; manage ~/.config/tmux/cheatsheet.txt with the tmux configuration |
 | Workspace/session/scratch helpers | Python 3.8+ with curses, tmux, Git | Launcher/session UI and scratch-folder safety; apply the tmux configuration and all seven helpers plus `tmux_keys.py` together |
@@ -116,6 +119,8 @@ When asked to bootstrap:
    runtime/package-manager ownership. Establish work/personal context and feature
    scope from the request; ask only for missing choices. Use the inventory helper
    when Python is available, otherwise use native read-only commands first.
+   Inspect alternate startup paths, environment-selected config directories,
+   private overrides and plugin loaders, including both home and XDG tmux configs.
 2. Research current official installation documentation and latest stable releases
    for the needed tools. Choose maintained packages or official binaries suitable
    for this machine; explain upstream lag or compatibility limits. Reuse suitable
@@ -135,10 +140,88 @@ When asked to bootstrap:
    scope. Use isolated configuration checks before changing live setup. Verify
    repeated application and preservation of private overrides; keep installation,
    network calls, and updates out of normal startup.
+   Honor requests for repository defaults by archiving conflicting overrides.
+   Verify ordinary fresh launches too: `chezmoi diff` and explicit config flags
+   do not detect every competing loader or inherited setting.
 6. Run applicable repo verification commands and check the selected features with
    real tool versions. Measure relevant startup/first-use/idle costs. Report installed
    versions, changes, restoration paths, skipped features, and actual verification
    limits; real SSH clipboard and agent recovery require their own checks.
+
+## Remote clipboard and Mosh
+
+Install current stable Ghostty, Mosh and pngpaste on Macs, using existing package
+ownership; install cc-clip from an upstream checksum-verified release. Keep its
+binary/version/source and backups outside Git. Install the same cc-clip version on
+the Linux remote in its own versioned directory, preserving existing ownership.
+The remote needs mosh-server, curl, xclip, Xvfb and xauth. SSH authentication must
+work in batch mode for the reconnecting tunnel; never copy credentials into Git.
+
+Apply the shared Ghostty config and `themes/github-dark` together, `~/.config/dotfiles/mosh-hosts`,
+`~/.local/bin/dotfiles-remote`, and `~/.zshrc` after scoped previews and private
+backups. Install JetBrainsMono Nerd Font Mono with its Medium style separately. Audit all
+Ghostty default paths listed in README before applying; explicit config validation
+does not reveal a macOS config loaded after the managed XDG file.
+
+On each Mac, install the clipboard daemon and native SSH tunnels once:
+
+```sh
+python3 scripts/setup-mac-clipboard-tunnels.py --dry-run
+python3 scripts/setup-mac-clipboard-tunnels.py
+cc-clip doctor
+```
+
+The installer derives per-host LaunchAgents from the shared allowlist, binds the
+forwarded clipboard port to remote loopback, and preserves private SSH config.
+It uses batch SSH with keepalives and launchd restart throttling. It backs up
+changed plists privately and removes only its marked tunnels for hosts removed
+from the list. Repeat after changing the allowlist; repeated application is inert.
+Removing a host disables its managed tunnel, not its ordinary SSH credentials.
+Mosh itself cannot carry an SSH port forward; keep this separate tunnel running.
+Run `python3 scripts/verify-remote.py` for offline routing regression checks.
+One Mac owns a remote host's clipboard port at a time. When moving the clipboard
+bridge to another Mac, stop the old Mac's tunnel and redeploy the token from the
+new Mac. Mosh terminal connections can still be used from multiple Macs.
+
+Back up remote shell files, any existing clipboard helpers/state, and agent config
+before deployment. For each allowed host, deploy both targets separately to avoid
+installing unrelated integrations or changing the existing agent hooks:
+
+```sh
+cc-clip connect HOST --claude --no-notify --use-remote-bin
+cc-clip connect HOST --codex --no-notify --use-remote-bin
+```
+
+`--use-remote-bin` preserves the separately installed remote binary. cc-clip may
+update marked blocks in shell rc files. The managed zshenv/zshrc already supply
+its PATH and DISPLAY/XAUTHORITY integration. Reapply only the managed zshrc after
+deployment and verify equality to the shared source;
+do not leave a second unmanaged loader or modify the source to match injected code.
+Preserve Bash-only settings outside the managed scope. `--no-notify` must leave
+Codex/Claude settings and attention/recovery hooks byte-identical.
+
+Start a fresh remote shell/agent after deployment. For a running tmux server,
+set its global DISPLAY and XAUTHORITY from the bridge's private display/cookie
+files for future panes, including separately configured inner servers. Existing
+agent processes keep their original environment; preserve them and resume their
+exact saved conversation IDs when convenient. Never restart a user's sessions
+just to apply clipboard settings. Leave real SSH X11-forwarded DISPLAY values intact.
+
+Verify Cmd+V multiline Unicode text and Ctrl+V routing in disposable tmux and nested
+tmux PTYs over SSH and Mosh. Use a synthetic PNG and an isolated clipboard provider
+for bridge checks; do not overwrite or dump the user's real clipboard. Verify both
+the Claude shim and the native X11 read used by Codex. A physical screenshot attach
+in each real agent remains a separate end-to-end check. `cc-clip doctor --host HOST`
+reads the clipboard: run it deliberately with a copied test image.
+
+Mac daemon/tunnels restart at login. The upstream remote Xvfb/bridge deployment
+runs until remote reboot; rerun the Codex deployment and refresh the agent's display
+after a remote reboot. Do not claim reboot persistence without a separate managed
+remote service. To restore, unload the generated tunnel LaunchAgent, restore its
+backed-up plist and bootstrap it; `cc-clip service uninstall` stops the local daemon.
+Upstream `cc-clip uninstall` on the remote removes its shims; restore backed-up
+shell/helper files and reapply the intended shared source. Never remove agent
+credentials or conversation state.
 
 ## Session ordering and pane movement
 
@@ -155,9 +238,20 @@ Inside the picker, j/k selects down/up, J/K reorders down/up, and e edits a
 shortcut. Previously saved e/J/K shortcuts migrate to available letters while
 preserving session order and unaffected keys; blank shortcuts remain blank.
 
+The bottom [Last] button uses native per-client history, like Ctrl+A, o. Its
+user mouse range leaves window-label clicks intact; release dispatch also handles
+rapid repeat clicks. Apply the catalog, config and help together. On the pilot,
+reload only the two root mouse bindings and prepend the new button format to the
+existing status-right value, preserving continuum's appended save hook. Back up
+the prior bindings/value for restoration; no plugin reload or session restart is needed.
+
 Shift-arrow pane swaps use native tmux commands, capture the invoking pane's
 exact ID, keep its focus, reveal zoomed layouts and stop at outer edges. IDs,
-processes and pane-local options survive swapping. Run
+processes and pane-local options survive swapping. z maximizes/restores; h/j/k/l
+preserves zoom. m freezes the source before showing numbered swap positions;
+Esc cancels. ! lifts that source into a new window, with an already-alone guard.
+= balances adjacent sizes. These are native commands; applying only their binding
+fragment preserves private prefixes, layouts and plugin status hooks. Run
 `python3 scripts/verify-sessions.py` for isolated two-client picker/order/key,
 concurrent preference writes, and spatial-pane checks at 120/70 columns. Physical
 terminal delivery of modified arrows remains a client check. On the Ubuntu pilot,
@@ -197,10 +291,34 @@ values. Use a separate `tmux -L inner` server for two roles on the same machine;
 load the inner profile only into that server rather than persisting it for both.
 Do not infer the role from SSH or change the outer server while configuring it.
 
+Installing the profile alone does not select it. For Mac outer tmux and Ubuntu
+inner tmux, activate the profile on Ubuntu and keep the Mac on the shared Ctrl+A
+default. The override makes Ubuntu use Ctrl+B for direct connections too.
+
+For nested text copying, check `tmux show-options -s set-clipboard` and
+`tmux info | rg 'Ms:'` in each layer. Both need an `Ms` capability and the outer
+layer must accept application copies with `set-clipboard on`. The shared config
+declares clipboard support for tmux/screen terminals. Mosh 1.4 accepts only OSC 52
+selector `c`; tmux 3.4's default empty selector is dropped even when `Ms` exists.
+The shared xterm `Ms` override consumes parameter 1 without emitting it and uses
+`c` with parameter 2's data. See the [Mosh parser](https://github.com/mobile-shell/mosh/blob/mosh-1.4.0/src/terminal/terminalfunctions.cc#L552)
+and [upstream report](https://github.com/tmux/tmux/issues/3423).
+
+Tmux 3.4 retains terminal capabilities for attached clients. Apply the config,
+then detach just the inner client with Ctrl+B, d and run `tmux attach` from the
+same remote shell; retain `-L`/`-S` when using a separate socket. Repeat for other
+clients when convenient. Do not restart the server or panes. Copy a fresh marker
+with Ctrl+B, [, v, selection, y and paste into a local Mac app. Identical repeated
+copies can be suppressed by Mosh's clipboard cache; use distinct test markers.
+
 For restoration, remove the added source line (preserving other private edits),
 restore the previous prefix option and Ctrl+A/Ctrl+B bindings. For the shared
 baseline these are `set -g prefix C-a`, `unbind -q C-b`, and `bind C-a send-prefix`.
 No session restart is needed. Preserve any pre-existing session overrides.
+For clipboard rollback, restore the previous `terminal-overrides[100]` and
+`terminal-features[103]`/`[104]` entries (unset entries that were absent), then
+reattach clients again. The pilot's private `tmux-inner-mosh-*/manifest.json`
+records original files, override, bindings and server options.
 
 From a shell in each layer, record the terminal app, tmux version, effective mouse
 setting and wheel bindings before changing configuration:

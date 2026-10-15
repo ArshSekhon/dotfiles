@@ -15,27 +15,44 @@ TMUX  |  Press Ctrl+A, then a key
 
   Switch
     B               Previous task
-    b               Previous session
+    o               Previous session
     Tab             Previous window
     p               Previous pane (keeps zoom)
     s / w           Session / window picker
 
-  Windows & panes
+  Focus & size
+    z               Maximize / restore pane
+    h / j / k / l   Focus left / down / up / right
+    H / J / K / L   Resize left / down / up / right
+
+  Move & arrange
+    m               Swap with a numbered position
+    Shift+Left      Move pane left
+    Shift+Down      Move pane down
+    Shift+Up        Move pane up
+    Shift+Right     Move pane right
+    !               Lift pane into a new window
+    =               Balance adjacent pane sizes
+
+  Windows & splits
     c               New shell window (current folder)
     | / -           Shell split: beside / below
-    h / j / k / l   Move left / down / up / right
-    H / J / K / L   Resize left / down / up / right
-    Shift+Left      Swap pane left
-    Shift+Down      Swap pane down
-    Shift+Up        Swap pane up
-    Shift+Right     Swap pane right
-    z               Zoom / unzoom pane
 
   Copy & settings
     [               Copy mode (v selects, y copies)
     ?               This cheatsheet
     R               Reload configuration
     Ctrl+A          Send Ctrl+A to the application
+
+Focus keeps zoom; arranging reveals the layout.
+After m: choose a displayed pane number; Esc cancels.
+
+STATUS BAR  |  No prefix
+------------------------------------------------------
+  [Last] toggles sessions for this client. Dimmed
+  means no previous session.
+  Left click        [Last]: previous session; window
+                    labels: select window
 
 SESSIONS  |  Ctrl+A s
 ------------------------------------------------------
@@ -139,3 +156,5 @@ COPY MODE  |  After Ctrl+A [
 ------------------------------------------------------
   v                 Select in copy mode
   y                 Copy to device clipboard; exit
+  Inner profile: Ctrl+B [ enters inner copy mode.
+  Nested copying needs set-clipboard on outside too.

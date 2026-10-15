@@ -1,6 +1,45 @@
 # Interactive features stay out of scripts and agent subprocesses.
 [[ -o interactive ]] || return
 
+# Keep installed helpers ahead of system tools after login profiles run.
+# The markers also let cc-clip recognize the shared PATH integration.
+# >>> cc-clip PATH (do not edit) >>>
+[[ -d $HOME/.local/bin ]] && path=("$HOME/.local/bin" $path)
+# <<< cc-clip PATH (do not edit) <<<
+
+# Simple interactive Mac connections use the shared Mosh allowlist. Flags,
+# remote commands, scripts and `command ssh` retain native SSH behavior.
+ssh() {
+    if [[ $OSTYPE == darwin* && $# == 1 && $1 != -* && -t 0 && -t 1 ]] &&
+       (( $+commands[dotfiles-remote] )); then
+        command dotfiles-remote "$1"
+    elif [[ $TERM == xterm-ghostty ]]; then
+        TERM=xterm-256color command ssh "$@"
+    else
+        command ssh "$@"
+    fi
+}
+
+# Optional image clipboard bridge, installed separately on headless remotes.
+# Keep the upstream markers/body so cc-clip recognizes this managed integration.
+# >>> cc-clip Codex DISPLAY (do not edit) >>>
+if [ -z "${DISPLAY:-}" ] && [ -r "$HOME/.cache/cc-clip/codex/display" ]; then
+  _cc_clip_display="$(cat "$HOME/.cache/cc-clip/codex/display" 2>/dev/null)"
+  case "$_cc_clip_display" in
+    :[0-9]*) _cc_clip_num="${_cc_clip_display#:}" ;;
+    [0-9]*)  _cc_clip_num="$_cc_clip_display" ;;
+    *)       _cc_clip_num="" ;;
+  esac
+  if [ -n "$_cc_clip_num" ]; then
+    export DISPLAY="127.0.0.1:${_cc_clip_num}"
+    if [ -r "$HOME/.cache/cc-clip/codex/Xauthority" ]; then
+      export XAUTHORITY="$HOME/.cache/cc-clip/codex/Xauthority"
+    fi
+  fi
+  unset _cc_clip_display _cc_clip_num
+fi
+# <<< cc-clip Codex DISPLAY (do not edit) <<<
+
 # Private state, shared between panes. A leading space omits a history entry.
 HISTSIZE=20000
 SAVEHIST=10000
