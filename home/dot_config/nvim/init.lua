@@ -6,7 +6,7 @@ vim.g.maplocalleader = ","
 local opt = vim.opt
 opt.number = true
 opt.cursorline = true
-opt.wrap = false
+opt.wrap = true -- Visual wrapping leaves the file's actual lines unchanged.
 opt.scrolloff = 4
 opt.sidescrolloff = 4
 opt.splitbelow = true
@@ -20,6 +20,21 @@ opt.laststatus = 3
 opt.statusline = " %<%f %m%r%=%l:%c  %p%% "
 opt.signcolumn = "yes" -- Diagnostics/Git signs do not shift the text sideways.
 opt.synmaxcol = 300 -- Bound syntax work on generated/minified lines.
+
+-- Use the terminal background, retaining the theme's foregrounds and text styles.
+-- Reapply after theme changes; terminal settings control actual transparency.
+vim.api.nvim_create_autocmd("ColorScheme", {
+  group = vim.api.nvim_create_augroup("DotfilesAppearance", { clear = true }),
+  desc = "Use the terminal background for editor text, gutters and floats",
+  callback = function()
+    for _, name in ipairs({ "Normal", "NormalNC", "NormalFloat", "SignColumn", "EndOfBuffer" }) do
+      local highlight = vim.api.nvim_get_hl(0, { name = name, link = false })
+      highlight.bg = nil
+      highlight.ctermbg = nil
+      vim.api.nvim_set_hl(0, name, highlight)
+    end
+  end,
+})
 vim.cmd.colorscheme("habamax")
 
 -- Filetype defaults and native EditorConfig can override this fallback.

@@ -79,6 +79,46 @@ def main():
             os.write(masters[0], keys)
             drain(0.05)
 
+        def mouse(x, y, button=0, release=True, client_index=0):
+            # Real SGR terminal input, with zero-based screen coordinates here.
+            packet = "\x1b[<{};{};{}M".format(button, x + 1, y + 1)
+            if release and button < 64:
+                packet += "\x1b[<{};{};{}m".format(button, x + 1, y + 1)
+            os.write(masters[client_index], packet.encode())
+            drain(0.05)
+
+        def client_details(client_name):
+            for line in run("list-clients", "-F",
+                            "#{client_name}\t#{session_name}\t#{client_width}\t#{client_height}").splitlines():
+                name, session, width, height = line.split("\t")
+                if name == client_name:
+                    return session, int(width), int(height)
+            raise AssertionError("Client disappeared")
+
+        def status_text(client_name, side):
+            # Freeze the pane too: display-message -c alone can use another session.
+            styled = run("display-message", "-p", "-c", client_name, "-t", context(client_name)[1],
+                         "#{T:status-" + side + "}")
+            return re.sub(r"#\[[^]]*\]", "", styled)
+
+        def click_session_name():
+            name, _, height = client_details(actor)
+            left = status_text(actor, "left")
+            assert name in left, left
+            mouse(left.index(name) + len(name) // 2, height - 1)
+
+        def click_last(client_name, client_index=0):
+            _, width, height = client_details(client_name)
+            right = status_text(client_name, "right")
+            mouse(width - len(right) + right.index("[Last]") + 2, height - 1,
+                  client_index=client_index)
+
+        def popup_cell(row):
+            _, width, height = client_details(actor)
+            popup_width, popup_height = width * 80 // 100, height * 75 // 100
+            return ((width - popup_width - 1) // 2 + 2,
+                    (height - popup_height - 1) // 2 + 1 + row)
+
         def clean_output():
             # Captured words can be interrupted by cursor/color control sequences.
             return re.sub(rb"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))", b"", bytes(output))
@@ -102,11 +142,14 @@ def main():
             return next(line.split("\t")[0] for line in run("list-clients", "-F",
                         "#{client_name}\t#{client_pid}").splitlines() if line.split("\t")[1] == str(process.pid))
 
-        def open_picker():
+        def open_picker(by_mouse=False):
             drain(0.05)
             output.clear()
             started = time.perf_counter()
-            os.write(masters[0], b"\x01s")
+            if by_mouse:
+                click_session_name()
+            else:
+                os.write(masters[0], b"\x01s")
             wait_for(lambda: b"e edit key" in clean_output())
             return (time.perf_counter() - started) * 1000
 
@@ -296,6 +339,103 @@ def main():
                 idle_cpu = idle_ticks / os.sysconf('SC_CLK_TCK') * 100
                 press(b"q")
 
+                # Status-name clicks open the same picker on just the invoking
+                # client. Header/drag/edit events must never switch sessions.
+                mouse_readiness = []
+                for width, height in ((120, 40), (70, 24)):
+                    fcntl.ioctl(masters[0], termios.TIOCSWINSZ, struct.pack("HHHH", height, width, 0, 0))
+                    os.kill(clients[0].pid, signal.SIGWINCH)
+                    wait_for(lambda: client_details(actor)[1:] == (width, height))
+                    mouse_readiness.append(open_picker(by_mouse=True))
+                    visible = helper["session_rows"](run)
+                    dev_index = next(i for i, row in enumerate(visible) if row["id"] == dev_id)
+                    docs_index = next(i for i, row in enumerate(visible) if row["name"] == "docs")
+                    mouse(*popup_cell(0))  # Header is inert.
+                    press(b"e")
+                    saved = preferences.read_bytes()
+                    mouse(*popup_cell(3 + dev_index))
+                    mouse(*popup_cell(3), button=65, release=False)
+                    assert preferences.read_bytes() == saved and context(actor)[0] == source_id
+                    press(b"\x1b")  # Cancel editing only.
+                    x, y = popup_cell(3 + dev_index)
+                    mouse(x, y, release=False)
+                    x, y = popup_cell(3 + docs_index)
+                    os.write(masters[0], "\x1b[<0;{};{}m".format(x + 1, y + 1).encode())
+                    drain(0.05)
+                    assert context(actor)[0] == source_id
+                    mouse(*popup_cell(3 + dev_index))
+                    wait_for(lambda: context(actor)[0] == dev_id)
+                    assert context(observer) == observer_before
+                    for expected_session in (source_id, dev_id, source_id):
+                        click_last(actor)
+                        wait_for(lambda: context(actor)[0] == expected_session)
+                        assert context(observer) == observer_before
+
+                    # Mouse-wheel selection is shared with keyboard acceptance.
+                    open_picker(by_mouse=True)
+                    source_index = next(i for i, row in enumerate(visible) if row["id"] == source_id)
+                    mouse(*popup_cell(3), button=64, release=False)
+                    press(b"\r")
+                    wait_for(lambda: context(actor)[0] == visible[max(0, source_index - 1)]["id"])
+                    click_last(actor)
+                    wait_for(lambda: context(actor)[0] == source_id)
+
+                    # More rows than the viewport: wheel to the end, then click
+                    # the first visible row. Hit testing must include scroll offset.
+                    saved = preferences.read_bytes()
+                    extras = ["scroll-{:02d}".format(i) for i in range(22)]
+                    try:
+                        for name in extras:
+                            run("new-session", "-d", "-s", name, "/bin/sleep 180")
+                        open_picker(by_mouse=True)
+                        visible = helper["session_rows"](run)
+                        capacity = max(1, height * 75 // 100 - 9)
+                        for _ in visible:
+                            mouse(*popup_cell(3), button=65, release=False)
+                        first_visible = visible[max(0, len(visible) - capacity)]
+                        mouse(*popup_cell(3))
+                        wait_for(lambda: context(actor)[0] == first_visible["id"])
+                        assert context(observer) == observer_before
+                        click_last(actor)
+                        wait_for(lambda: context(actor)[0] == source_id)
+                    finally:
+                        for name in extras:
+                            run("kill-session", "-t", "=" + name)
+                        preferences.write_bytes(saved)
+
+                # No previous session: the observer's Last button stays inert.
+                click_last(observer, 1)
+                assert context(observer) == observer_before and context(actor)[0] == source_id
+
+                # Ordinary window-label clicks still work alongside user ranges.
+                fcntl.ioctl(masters[0], termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
+                os.kill(clients[0].pid, signal.SIGWINCH)
+                wait_for(lambda: client_details(actor)[1:] == (120, 40))
+                output.clear()
+                source_window = run("display-message", "-p", "-t", source_pane, "#{window_id}")
+                mouse_window = run("new-window", "-d", "-t", source_id + ":", "-n", "mouse-window",
+                                   "-P", "-F", "#{window_id}", "/bin/sleep 180")
+                wait_for(lambda: b"mouse-window" in clean_output())
+                x = len(status_text(actor, "left"))
+                separator = run("show-options", "-gwv", "window-status-separator")
+                for line in run("list-windows", "-t", source_id, "-F",
+                                "#{window_id}\t#{E:window-status-format}").splitlines():
+                    window, text = line.split("\t", 1)
+                    label = re.sub(r"#\[[^]]*\]", "", text)
+                    if window == mouse_window:
+                        x += label.index("mouse-window") + 2
+                        break
+                    x += len(label) + len(separator)
+                # Tmux 3.4 combines rapid presses across different coordinates.
+                # Let its 300 ms multi-click timer expire for this ordinary click;
+                # rapid clicks on our release-based controls are checked above.
+                drain(0.35)
+                mouse(x, 39)
+                wait_for(lambda: context(actor)[1] != source_pane)
+                run("select-window", "-t", source_window)
+                run("kill-window", "-t", mouse_window)
+                assert context(observer) == observer_before and snapshot() == original
+
             # Spatial pane swaps preserve IDs/PIDs/private labels and ignore marked panes.
             right = run("split-window", "-h", "-d", "-t", source_pane, "-P", "-F", "#{pane_id}", "/bin/sleep 180")
             run("split-window", "-v", "-d", "-t", source_pane, "/bin/sleep 180")
@@ -427,9 +567,12 @@ def main():
             print("Passed: stable/private keys, assignment/clear/cancel, concurrent writes, malformed state,")
             print("reserved-key migration, e editing, J/K and Shift-arrow ordering, reopened names, letter jumps,")
             print("two-client routing, 120/70-column UI,")
+            print("status-name popup, mouse row/wheel/viewport selection, inert headers/drags/editing,")
+            print("Last-button history/disabled state and ordinary window-label clicks,")
             print("maximize/zoomed focus, numbered placement/cancel, balance/lift, pane back-and-forth,")
             print("spatial swaps/edges/marked-pane safety and preserved processes/metadata.")
             print("Numbered move first paint {:.1f}/{:.1f} ms at 120/70 columns.".format(*move_readiness))
+            print("Mouse-opened picker first paint {:.1f}/{:.1f} ms at 120/70 columns.".format(*mouse_readiness))
             print("First inventory {:.1f} ms; popup {:.1f}/{:.1f} ms; one-second idle CPU {:.1f}%.".format(
                   first_ms, popup_ms, narrow_ms, idle_cpu))
         finally:

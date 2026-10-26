@@ -246,7 +246,7 @@ def pick(panes, current, query="", include_hidden=False, message="", attention_o
          "--query=" + query, "--tiebreak=index",
          # Wait for asynchronous matching before acting on fast typing/pastes.
          "--bind=" + KEYS["fzf_bindings"](actions),
-         "--color=bg:#1a1b26,fg:#c0caf5,hl:#7aa2f7,bg+:#283457,fg+:#c0caf5,hl+:#7aa2f7,pointer:#7aa2f7,prompt:#7aa2f7,header:#565f89"],
+         "--color=bg:#101010,fg:#d4d4d4,hl:#eeeeee,bg+:#262626,fg+:#eeeeee,hl+:#ffffff,pointer:#b0b0b0,prompt:#b0b0b0,header:#808080,info:#808080,marker:#b0b0b0,spinner:#b0b0b0,border:#333333"],
         input=b"\0".join(os.fsencode(row) for row in rows) + (b"\0" if rows else b""),
         stdout=subprocess.PIPE, env=env,
     )

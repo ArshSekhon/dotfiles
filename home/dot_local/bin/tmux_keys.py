@@ -3,6 +3,8 @@ Run python3 scripts/sync-tmux-keys.py after changing this file.
 No downloads, installs, or work at idle.
 """
 
+SESSION_PICKER_COMMAND = 'run-shell -C "display-popup -EE -w 80% -h 75% -T \'Sessions\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} \'exec \\"\\$HOME/.local/bin/tmux-sessions\\"\'"'
+
 PREFIX = (
     ('prefix', 'C-a', 'Send Ctrl+A to the application', 'bind C-a send-prefix'),
     ('copy-mode-vi', 'v', 'Select in copy mode', 'bind -T copy-mode-vi v send-keys -X begin-selection'),
@@ -40,7 +42,7 @@ PREFIX = (
     ('prefix', '=', 'Balance adjacent pane sizes', 'bind = select-layout -E'),
     ('prefix', 'p', 'Previous pane; keep zoom', 'bind p last-pane -Z'),
     ('prefix', 'Tab', 'Previous window', 'bind Tab last-window'),
-    ('prefix', 's', 'Session picker: letter shortcuts and custom order', 'bind s run-shell -C "display-popup -EE -w 80% -h 75% -T \'Sessions\' -e DOTFILES_TMUX_CLIENT=#{q:client_name} -e DOTFILES_TMUX_SOCKET=#{q:socket_path} \'exec \\"\\$HOME/.local/bin/tmux-sessions\\"\'"'),
+    ('prefix', 's', 'Session picker: letter shortcuts and custom order', 'bind s ' + SESSION_PICKER_COMMAND),
     ('prefix', 'w', 'Window picker', 'bind w choose-tree -Zw'),
     ('prefix', 'R', 'Reload configuration', 'bind R source-file ~/.tmux.conf \\; display-message "tmux reloaded"'),
     ('prefix', '?', 'Shortcut cheatsheet', 'bind ? display-popup -EE -w 85% -h 85% -T \'Keys\' \'exec env LESS= LESSOPEN= LESSCLOSE= LESSHISTFILE=- LESSSECURE=1 less -i -P"j/k scroll  / search  q close" "$HOME/.config/tmux/cheatsheet.txt"\''),
@@ -55,14 +57,15 @@ PREFIX = (
     ('prefix', '[', 'Enter copy mode', 'bind [ copy-mode'),
     # User status ranges dispatch through Status; retain native window selection.
     # Native format conditions and switch-client keep this local to the clicking client.
-    ('root', 'MouseDown1Status', 'Select window labels; reserve the [Last] button',
-     'bind -T root MouseDown1Status if-shell -F \'#{!=:#{mouse_status_range},last-session}\' '
+    ('root', 'MouseDown1Status', 'Select window labels; reserve session controls',
+     'bind -T root MouseDown1Status if-shell -F \'#{==:#{mouse_status_range},window}\' '
      '\'select-window -t =\' \'\''),
     # Release events stay consistent when tmux classifies rapid presses as double/triple clicks.
-    ('root', 'MouseUp1Status', 'Click [Last] to toggle the previous session',
-     'bind -T root MouseUp1Status if-shell -F '
+    ('root', 'MouseUp1Status', 'Click session name for picker; [Last] returns',
+     'bind -T root MouseUp1Status if-shell -F \'#{==:#{mouse_status_range},session-picker}\' '
+     '{ ' + SESSION_PICKER_COMMAND + ' } { if-shell -F '
      '\'#{&&:#{==:#{mouse_status_range},last-session},#{!=:#{client_last_session},}}\' '
-     '\'switch-client -l\' \'\''),
+     '\'switch-client -l\' \'\' }'),
 )
 
 # Explicit per-server choice, sourced from the inner host's private override.
@@ -314,13 +317,14 @@ def cheatsheet():
                   + ": choose a displayed pane number; Esc cancels.", ""])
 
     heading("STATUS BAR  |  No prefix",
-            "[Last] toggles sessions for this client. Dimmed means no previous session.")
-    rows([binding("[Last]: previous session; window labels: select window",
+            "Click the session name for its picker. [Last] toggles sessions for this client; dimmed means no previous session.")
+    rows([binding("Session name: picker; [Last]: previous session",
                   "switch-client -l", table="root")])
+    rows([("Window label", "Click to select its window")])
     lines.append("")
 
     heading("SESSIONS  |  Ctrl+A " + prefix_key("tmux-sessions"),
-            "Inside popup: letter keys jump directly. Order and keys persist privately by session name.")
+            "Inside popup: click or letter opens; wheel or j/k selects. Order and keys persist privately by session name.")
     rows([("j/k or Up/Down", "Select a session"), ("Letter", "Jump to its session")])
     rows(actions(SESSION_ACTIONS, {"jump": "Open selected session", "key": "Assign a letter; Backspace clears",
                                  "raise": "Move selected session up", "lower": "Move selected session down"}))

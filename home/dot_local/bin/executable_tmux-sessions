@@ -187,7 +187,7 @@ def read_key(screen):
     known = {curses.KEY_UP: "up", curses.KEY_DOWN: "down",
              curses.KEY_SR: "shift-up", curses.KEY_SF: "shift-down",
              curses.KEY_BACKSPACE: "backspace", curses.KEY_DC: "backspace",
-             curses.KEY_ENTER: "enter", curses.KEY_RESIZE: "resize",
+             curses.KEY_ENTER: "enter", curses.KEY_RESIZE: "resize", curses.KEY_MOUSE: "mouse",
              "\n": "enter", "\r": "enter", "\x7f": "backspace",
              "\b": "backspace", "\x0c": "ctrl-l", "\x03": "esc"}
     if key in known:
@@ -201,15 +201,19 @@ def read_key(screen):
 def picker(screen, run, client, identity):
     screen.keypad(True)
     curses.curs_set(0)
+    # Report button transitions without ncurses' click-combination delay. Open on
+    # release so the click must start and finish on the same visible session row.
+    curses.mousemask(curses.ALL_MOUSE_EVENTS)
+    curses.mouseinterval(0)
     if curses.has_colors():
         curses.start_color()
         curses.use_default_colors()
-        curses.init_pair(1, 111 if curses.COLORS >= 256 else curses.COLOR_CYAN, -1)
-        curses.init_pair(2, 153 if curses.COLORS >= 256 else curses.COLOR_WHITE,
-                         237 if curses.COLORS >= 256 else curses.COLOR_BLUE)
+        curses.init_pair(1, 250 if curses.COLORS >= 256 else curses.COLOR_WHITE, -1)
+        curses.init_pair(2, 255 if curses.COLORS >= 256 else curses.COLOR_BLACK,
+                         235 if curses.COLORS >= 256 else curses.COLOR_WHITE)
     rows = session_rows(run)
     selected = next((i for i, row in enumerate(rows) if row["id"] == identity[1]), 0)
-    message, editing = "", False
+    message, editing, pressed = "", False, None
     while rows:
         height, width = screen.getmaxyx()
         screen.erase()
@@ -222,7 +226,7 @@ def picker(screen, run, client, identity):
                     pass
 
         put(0, "Session shortcuts", curses.color_pair(1) | curses.A_BOLD)
-        put(1, "Letter opens  |  j/k selects  |  * current")
+        put(1, "Click/letter opens | Wheel/j/k selects | * current")
         capacity = max(1, height - 7)
         start = max(0, min(selected - capacity + 1, max(0, len(rows) - capacity)))
         for i, row in enumerate(rows[start:start + capacity], start):
@@ -240,6 +244,39 @@ def picker(screen, run, client, identity):
             curses.color_pair(1))
         screen.refresh()
         key = read_key(screen)
+        if key == "mouse":
+            try:
+                _, x, y, _, state = curses.getmouse()
+            except curses.error:
+                pressed = None
+                continue
+            if editing:
+                pressed = None
+                continue
+            if state & curses.BUTTON4_PRESSED:
+                selected = max(0, selected - 1)
+                pressed = None
+                continue
+            if state & getattr(curses, "BUTTON5_PRESSED", 0):
+                selected = min(len(rows) - 1, selected + 1)
+                pressed = None
+                continue
+            # Coordinates belong to the displayed viewport, including after scroll
+            # or resize. Headers, footers and drags between rows never open a session.
+            index = start + y - 3
+            row = (rows[index] if 1 <= x < width - 1 and 3 <= y < 3 + capacity
+                   and 0 <= index < len(rows) else None)
+            if state & curses.BUTTON1_PRESSED:
+                pressed = row["id"] if row else None
+            elif state & curses.BUTTON1_RELEASED:
+                if row and pressed == row["id"]:
+                    return row
+                pressed = None
+            elif row and state & (curses.BUTTON1_CLICKED | curses.BUTTON1_DOUBLE_CLICKED
+                                  | curses.BUTTON1_TRIPLE_CLICKED):
+                return row
+            continue
+        pressed = None
         if key == "resize":
             continue
         row = rows[selected]

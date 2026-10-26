@@ -181,7 +181,8 @@ chezmoi --source="$PWD" apply --dry-run ~/.zshenv ~/.zshrc
 
 `v file` or `nvim file` opens the native review/editing setup: absolute line numbers,
 current-line highlighting, a compact filename/position status line, and the built-in
-dark habamax theme. Search ignores case until you type capitals; substitutions
+dark habamax theme with a transparent editor background. Long lines wrap visually
+by default (`:set nowrap` disables it per window). Search ignores case until you type capitals; substitutions
 preview their changes. Native filetype support and
 [EditorConfig](https://neovim.io/doc/user/editorconfig/) control project indentation,
 with four spaces as the fallback. No downloads or updates run in the editor.
@@ -252,10 +253,16 @@ nvim --headless -u NONE -c 'helptags ~/.config/nvim/doc' -c qa
 
 ## Existing tmux work
 
+The bottom status bar and menus use a minimal neutral dark palette: near-black
+backgrounds, gray borders and a subtle active-window highlight. Amber marks an
+active prefix; agent attention keeps its input/error/response colors. Tmux status
+formats stay native, without a theme plugin or extra status commands.
+
 Ctrl+A, ? opens the shortcut cheatsheet: j/k scrolls, / searches, and q closes.
 
-Ctrl+A, **s** opens the session picker with stable letter shortcuts instead of
-numbered rows. Press a displayed letter to jump, or j/k (Up/Down) then Enter.
+Ctrl+A, **s** or clicking the **session name** in the bottom bar opens the session
+picker with stable letter shortcuts. Click a row or press its letter to open it;
+the mouse wheel or j/k (Up/Down) moves selection, and Enter opens the selected row.
 **e** edits the selected session's shortcut; Backspace clears it and Esc cancels.
 **j/k** selects down/up; **J/K** moves the selected session down/up in this list
 (Shift+Down/Up also works). e/j/k/q/J/K are reserved for these controls.

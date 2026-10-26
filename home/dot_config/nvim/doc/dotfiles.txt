@@ -13,6 +13,9 @@ Space fo      :edit path; Tab completes paths
 Ctrl+h/j/k/l  Move between splits
 Esc           Clear search highlights
 
+Long lines wrap visually by default; :set nowrap disables wrapping in this window.
+Editor backgrounds follow the terminal; terminal settings control transparency.
+
 Managed files come from home/dot_config/nvim/ in the dotfiles repository.
 Edit those sources to persist changes; chezmoi overwrites installed files.
 Private machine/employer choices belong in init.local.lua beside init.lua,

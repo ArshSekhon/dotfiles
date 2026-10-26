@@ -227,7 +227,8 @@ rg/delta, and scoped chezmoi preservation/reruns. Warm readiness measured ~54 ms
 uncached ~242 ms, steady prompts ~24 ms, and a directory change plus prompt ~40 ms;
 idle CPU remained 0% in a one-second sample. Editor measurements follow below.
 
-Neovim uses commented native defaults, EditorConfig, private persistent undo,
+Neovim uses commented native defaults, visual line wrapping, terminal background
+transparency, EditorConfig, private persistent undo,
 external-edit checks, explicit SSH OSC 52 copying, and built-in help. Space `?`,
 `vc`, and `vl` open its cheatsheet, installed config, and language settings; managed
 edits belong in `home/dot_config/nvim/`, private overrides in `init.local.lua`.
@@ -265,9 +266,12 @@ versions, integrity/commits, backups and detailed checks stay in private state;
 no permanent upstream-plugin verification harness is maintained.
 
 The tmux baseline uses Ctrl+A, stable task names, current-directory windows/splits,
-vi copy mode, OSC 52 support, and a compact native Tokyo Night bottom status line
-with an amber hostname highlight while the prefix is active
-(session name on narrow terminals). Managed agent panes capture exact conversation
+vi copy mode, OSC 52 support, and a compact native neutral dark bottom status line,
+gray pane borders and matching menus. Amber highlights the hostname while the prefix is active
+(session name on narrow terminals). Ubuntu/tmux 3.4 current-source checks passed at
+120/70 columns for the neutral palette and menus, prefix and mouse ranges, plus
+scoped apply/rerun/restoration; live application preserved all 14 panes, layouts,
+three clients and the continuum command. Managed agent panes capture exact conversation
 IDs privately; tmux-resurrect restores layouts and invokes exact-ID recovery.
 The pilot keeps its pre-existing resurrect/continuum plugins in ~/.tmux.local.conf,
 an unmanaged private override loaded beside ~/.tmux.conf. Its compatibility plugin
@@ -282,7 +286,7 @@ and scoped chezmoi restoration. The profile/help are installed. Ubuntu activatio
 is recorded below; work-machine activation and physical terminals remain unverified.
 
 Ubuntu nested-copy fix, 2026-10-12: the user selected this server as the inner
-layer beneath Mac tmux. Its private override now persists Ctrl+B; the shared
+layer beneath Mac tmux. Its private override persisted Ctrl+B for that pilot; the shared
 default remains Ctrl+A for the outer layer. Mosh 1.4.0 dropped tmux 3.4's empty
 OSC 52 selector despite valid Ms capabilities in both layers. A fixed xterm Ms
 override emits selector c, and tmux/screen clients declare clipboard support.
@@ -294,6 +298,12 @@ idle CPU. Applied only native options/profile, preserving all live pane IDs/PIDs
 layouts, attached clients, mouse and continuum status suffix. Existing tmux 3.4
 clients must detach/reattach to refresh Ms; none was disconnected automatically.
 Physical Mac clipboard delivery awaits the user's check.
+
+Ubuntu prefix cleanup, 2026-10-18: removed the persistent inner-profile source
+from the private override and restored Ctrl+A on the normal server. Ctrl+B remains
+opt-in for a separate inner server. Isolated startup/reload and live checks preserved
+clipboard settings, other private overrides, pane IDs/PIDs, layouts, clients and
+the continuum status suffix; no sessions were restarted.
 
 SSH clients: Ghostty on macOS and RootShell on iPad. Use native OSC 52; the pilot's
 attached xterm-256color clients advertise `Ms` and `set-clipboard` is already on.
@@ -325,7 +335,10 @@ Apply that file with the tmux configuration; no help/history files are written a
 Verified on an isolated server at 120x40 and 70x24: scrolling/search/close,
 ~26 ms first paint, chezmoi dry-run/reruns/restoration, and live-pane preservation.
 
-Ctrl+A, s uses an on-demand curses session picker. Stable letter keys jump;
+Ctrl+A, s or clicking the bottom session name opens an on-demand curses session
+picker. A row click opens that session; the wheel moves selection and scrolls.
+Mouse input is ignored while assigning a letter; headers/footers and drags
+between rows do not switch sessions. Stable letter keys jump;
 j/k or arrows selects, Enter opens, e edits its key (Backspace clears,
 Esc cancels; e/j/k/q/J/K reserved), J/K moves the selected session down/up
 (Shift+Down/Up also works). Ctrl+L refreshes, and Esc/q closes. Private 0600 preferences under
@@ -333,6 +346,13 @@ Esc cancels; e/j/k/q/J/K reserved), J/K moves the selected session down/up
 reopening/layout restores; concurrent edits merge under a private lock. Previously
 saved e/J/K shortcuts migrate to available letters. This order applies to this
 picker, without changing native IDs or other pickers.
+Ubuntu mouse picker, 2026-10-25: current-source two-client PTYs passed status-name
+clicks, row/wheel/scroll-offset selection, inert headers/drags/key editing, Last
+history and window-label clicks at 120/70 columns. Mouse-opened first paint was
+~58/59 ms; sampled idle CPU stayed 0%. Baseline and scoped chezmoi checks passed.
+Applied the picker/catalog/help/config and only two live root bindings plus
+status-left, preserving panes/PIDs/layouts/clients, private overrides, clipboard
+and the exact continuum status-right value. Physical client delivery remains a check.
 Ctrl+A, Shift+Arrow swaps panes inside the current window, preserving focus,
 IDs/processes/labels/attention. It reveals zoom first and stops at outer edges.
 Ctrl+A, z maximizes/restores; h/j/k/l keeps zoom while changing focus.

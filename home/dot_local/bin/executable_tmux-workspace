@@ -199,7 +199,7 @@ def pick_folder(current):
              "--bind=~:transform:if [ -z \"$FZF_QUERY\" ]; then "
              "printf 'change-query:%s' \"$HOME\"; else printf 'put(~)'; fi",
              "--tiebreak=index",
-             "--color=bg:#1a1b26,fg:#c0caf5,hl:#7aa2f7,bg+:#283457,fg+:#c0caf5,hl+:#7aa2f7,pointer:#7aa2f7,prompt:#7aa2f7,header:#565f89"],
+             "--color=bg:#101010,fg:#d4d4d4,hl:#eeeeee,bg+:#262626,fg+:#eeeeee,hl+:#ffffff,pointer:#b0b0b0,prompt:#b0b0b0,header:#808080,info:#808080,marker:#b0b0b0,spinner:#b0b0b0,border:#333333"],
             input=b"\0".join(os.fsencode(label) for label in labels) + b"\0",
             stdout=subprocess.PIPE, env=env,
         )
@@ -262,16 +262,16 @@ def launch_menu(current):
 
     def menu(screen):
         screen.keypad(True)
-        blue, selected, muted = curses.A_BOLD, curses.A_REVERSE, curses.A_NORMAL
+        heading, selected, muted = curses.A_BOLD, curses.A_REVERSE, curses.A_NORMAL
         if curses.has_colors():
             curses.start_color()
             curses.use_default_colors()
             if curses.COLORS >= 256:
-                curses.init_pair(1, 111, -1)
-                curses.init_pair(2, 153, 237)
-                curses.init_pair(3, 60, -1)
-                curses.init_pair(4, 153, -1)
-                blue = curses.color_pair(1) | curses.A_BOLD
+                curses.init_pair(1, 250, -1)
+                curses.init_pair(2, 255, 235)
+                curses.init_pair(3, 244, -1)
+                curses.init_pair(4, 252, -1)
+                heading = curses.color_pair(1) | curses.A_BOLD
                 selected = curses.color_pair(2) | curses.A_BOLD
                 muted = curses.color_pair(3)
                 screen.bkgd(" ", curses.color_pair(4))
@@ -299,7 +299,7 @@ def launch_menu(current):
             if editing:
                 title = {"scratch": "Scratch task", "pane": "Named pane",
                          "session": "New session"}[actions[action][0]]
-                line(1, title + " / " + agent.capitalize(), blue)
+                line(1, title + " / " + agent.capitalize(), heading)
                 line(3, "Name: " + name)
                 description = {"scratch": "Files stay outside project checkouts.",
                                "pane": "Another agent in the current folder.",
@@ -313,12 +313,12 @@ def launch_menu(current):
                     line(9, KEYS["key_label"](next(key for key, action in KEYS["NAME_KEYS"].items() if action == "folder")) + " choose folder", muted)
                 screen.move(min(3, height - 1), min(8 + len(name), width - 2))
             else:
-                line(1, "Open workspace", blue)
+                line(1, "Open workspace", heading)
                 for index, (_, label) in enumerate(actions):
                     line(3 + index, (("> " if action == index else "  ") + label).ljust(width - 4),
                          selected if action == index else 0)
                 options = "[Codex]  Claude" if agent == "codex" else " Codex  [Claude]"
-                line(7, "Agent for new launches: " + options, blue)
+                line(7, "Agent for new launches: " + options, heading)
                 line(8, KEYS["action_hint"]({KEYS["action_key"](action_keys, token): action_keys[KEYS["action_key"](action_keys, token)]
                                              for token in ("named-pane", "folder", "tasks")}), muted)
                 line(9, KEYS["workspace_hint"](), muted)

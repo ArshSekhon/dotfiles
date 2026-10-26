@@ -256,7 +256,8 @@ def main():
                 return run("display-message", "-p", "-c", client_name,
                            "#{E:status-left}")
 
-            assert "|" in left_label()
+            # User mouse ranges also contain '|'; inspect the visible separator.
+            assert "|" in re.sub(r"#\[[^]]*\]", "", left_label())
             assert "bg=#e0af68" not in left_label()
             idle_left = re.sub(r"#\[[^]]*\]", "", left_label())
             press(b"\x01")
@@ -273,7 +274,7 @@ def main():
             fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 70, 0, 0))
             os.kill(client.pid, signal.SIGWINCH)
             wait_for(lambda: run("list-clients", "-F", "#{client_width}") == "70")
-            assert "|" not in left_label()
+            assert "|" not in re.sub(r"#\[[^]]*\]", "", left_label())
             press(b"\x01")
             wait_for(lambda: "bg=#e0af68" in left_label())
             assert "baseline" in left_label()

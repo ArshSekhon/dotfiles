@@ -49,15 +49,18 @@ After m: choose a displayed pane number; Esc cancels.
 
 STATUS BAR  |  No prefix
 ------------------------------------------------------
-  [Last] toggles sessions for this client. Dimmed
-  means no previous session.
-  Left click        [Last]: previous session; window
-                    labels: select window
+  Click the session name for its picker. [Last]
+  toggles sessions for this client; dimmed means no
+  previous session.
+  Left click        Session name: picker; [Last]:
+                    previous session
+  Window label      Click to select its window
 
 SESSIONS  |  Ctrl+A s
 ------------------------------------------------------
-  Inside popup: letter keys jump directly. Order and
-  keys persist privately by session name.
+  Inside popup: click or letter opens; wheel or j/k
+  selects. Order and keys persist privately by session
+  name.
   j/k or Up/Down    Select a session
   Letter            Jump to its session
   Enter             Open selected session

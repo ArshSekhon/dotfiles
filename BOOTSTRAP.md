@@ -225,7 +225,8 @@ credentials or conversation state.
 
 ## Session ordering and pane movement
 
-Ctrl+A, s uses the curses `tmux-sessions` popup; apply that executable,
+Ctrl+A, s or a click on the bottom session name opens the curses `tmux-sessions`
+popup; apply that executable,
 `tmux_keys.py`, the tmux configuration and cheatsheet together. Letter keys and
 custom ordering are private, keyed by session name rather than reboot-sensitive
 native IDs. Preferences live in `$XDG_STATE_HOME/dotfiles/sessions/` (default
@@ -237,6 +238,10 @@ are refused. See README.md and Ctrl+A, ? for the popup controls.
 Inside the picker, j/k selects down/up, J/K reorders down/up, and e edits a
 shortcut. Previously saved e/J/K shortcuts migrate to available letters while
 preserving session order and unaffected keys; blank shortcuts remain blank.
+Clicking a session row opens it; the wheel moves selection and scrolls the
+viewport. Mouse actions are ignored while editing a letter. Clicks on headers,
+footers, or drags between rows do not open a session. Mouse tracking is active
+only while the popup runs; input still blocks without polling.
 
 The bottom [Last] button uses native per-client history, like Ctrl+A, o. Its
 user mouse range leaves window-label clicks intact; release dispatch also handles
@@ -244,6 +249,14 @@ rapid repeat clicks. Apply the catalog, config and help together. On the pilot,
 reload only the two root mouse bindings and prepend the new button format to the
 existing status-right value, preserving continuum's appended save hook. Back up
 the prior bindings/value for restoration; no plugin reload or session restart is needed.
+The session name has its own user range in both wide and narrow status layouts;
+its mouse release reuses the keyboard popup command and captures the clicking
+client. For this change, apply the picker/catalog/config/help together, then
+reload only the two root mouse bindings and `status-left`. Preserve the exact
+live `status-right` including continuum's command. `verify-sessions.py` sends real
+SGR clicks/wheel events through two isolated clients to check routing and ranges.
+Private `tmux-session-mouse-*/manifest.json` backups record original target files,
+the two root bindings and `status_left`; restore those values without a full reload.
 
 Shift-arrow pane swaps use native tmux commands, capture the invoking pane's
 exact ID, keep its focus, reveal zoomed layouts and stop at outer edges. IDs,
@@ -257,6 +270,9 @@ concurrent preference writes, and spatial-pane checks at 120/70 columns. Physica
 terminal delivery of modified arrows remains a client check. On the Ubuntu pilot,
 reload only the changed bindings to preserve the legacy continuum status hook;
 after any full configuration reload, check that the hook is still present.
+For palette changes, apply the config and affected menu helpers together. Reload
+only changed style options, retaining the exact existing continuum status command;
+keep all other live options, hooks and private overrides intact.
 Pilot backups live under `$XDG_STATE_HOME/dotfiles/backups/tmux-sessions-*/`.
 The private manifest records original files/modes (or new targets) and the five
 prior bindings. Restore those files and bindings, unbinding keys previously absent;
@@ -264,7 +280,7 @@ retain intervening private changes. No full reload or session restart is require
 
 ## Nested tmux checks
 
-Keep the shared Ctrl+A default on the outer server. For a separate inner server,
+Keep the shared Ctrl+A default for normal/direct access. For a dedicated inner server,
 preview/apply the profile, help and catalog together:
 
 ```sh
@@ -291,9 +307,9 @@ values. Use a separate `tmux -L inner` server for two roles on the same machine;
 load the inner profile only into that server rather than persisting it for both.
 Do not infer the role from SSH or change the outer server while configuring it.
 
-Installing the profile alone does not select it. For Mac outer tmux and Ubuntu
-inner tmux, activate the profile on Ubuntu and keep the Mac on the shared Ctrl+A
-default. The override makes Ubuntu use Ctrl+B for direct connections too.
+Installing the profile alone does not select it. Keep normal Ubuntu SSH/Mosh
+access on Ctrl+A. Persist the override only for a server intended to always use
+the inner role: it also changes direct connections and is not selected per client.
 
 For nested text copying, check `tmux show-options -s set-clipboard` and
 `tmux info | rg 'Ms:'` in each layer. Both need an `Ms` capability and the outer
